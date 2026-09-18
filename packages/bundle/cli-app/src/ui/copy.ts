@@ -63,6 +63,7 @@ export const COPY = {
   boardTurnNow: '当前回合',
   boardLastTurn: '上回合',
   boardTimeline: '回合时间线',
+  boardReplyGlyph: '●',
   boardQueueLabel: '排队',
   boardEmptySpans: '暂无回合记录 · 发送第一条消息后开始记录',
   boardNoTodos: '本会话暂无任务清单（agent 调 todo/write 后显示）',

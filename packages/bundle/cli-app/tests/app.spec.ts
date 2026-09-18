@@ -32,7 +32,7 @@ function snapshot(overrides: Partial<UiState>): UiState {
     todos: null,
     queued: [],
     boardOpen: false,
-    turnSpans: [],
+    turnTimeline: [],
     choicePicker: null,
     connectWizard: null,
     transcriptEpoch: 0,

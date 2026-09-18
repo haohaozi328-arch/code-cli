@@ -6,4 +6,5 @@
  */
 
 export { App } from './App.tsx'
-export { TaskBoard, collectTurnSpans, formatClock, isBoardToggle, reduceTurnSpans, TURN_SPAN_LIMIT } from './taskboard.tsx'
+export { TaskBoard, collectTurnEntries, formatClock, isBoardToggle, reduceTurnEntries, TURN_TIMELINE_LIMIT } from './taskboard.tsx'
+export type { TurnEntry } from './model.ts'

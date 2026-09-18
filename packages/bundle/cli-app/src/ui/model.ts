@@ -95,14 +95,22 @@ export interface ContextOccupancy {
   contextWindow: number
 }
 
-/** One observed agent turn with its wall-clock span (durable event times). */
-export interface TurnSpan {
+/** One observed agent turn in the board's conversation timeline, folded from the durable log. */
+export interface TurnEntry {
   /** The turn counter carried by `turn/start`. */
   turn: number
   /** Epoch milliseconds when the turn started. */
   startedAt: number
   /** Epoch milliseconds when the turn settled, or null while open. */
   endedAt: number | null
+  /** Latest human prompt in the turn (first line, truncated). */
+  prompt: string
+  /** Latest assistant reply (first text line, truncated). */
+  reply: string
+  /** Tool names invoked during the turn, in first-invocation order. */
+  tools: string[]
+  /** Output tokens this turn's assistant messages reported. */
+  outputTokens: number
 }
 
 /** Whole-screen snapshot handed to React through useSyncExternalStore. */
@@ -133,8 +141,8 @@ export interface UiState {
   queued: readonly string[]
   /** Whether the full-screen task board has replaced the conversation view. */
   boardOpen: boolean
-  /** Recent per-turn wall-clock spans folded from the durable log, oldest first. */
-  turnSpans: readonly TurnSpan[]
+  /** Per-turn conversation timeline folded from the durable log, oldest first. */
+  turnTimeline: readonly TurnEntry[]
   /** An open model/policy/connect choice list, or null. */
   choicePicker: ChoicePickerState | null
   /** Current `/connect` wizard, excluding the secret API key. */

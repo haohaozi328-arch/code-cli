@@ -261,7 +261,7 @@ function snapshot(): UiState {
     modelLabel: 'Mock',
     permissionPreset: 'ask',
     boardOpen: false,
-    turnSpans: [],
+    turnTimeline: [],
     sessionId: SessionId('s-1'),
     sessionLabel: 'label',
     pickerOpen: false,

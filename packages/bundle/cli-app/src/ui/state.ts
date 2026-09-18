@@ -38,7 +38,7 @@ import type {
 import { renderError } from './render-error.ts'
 import { contextOccupancy, estimateLiveTokens, tokensPerSecond } from './status.ts'
 import { blocksToText, countDurableTokens, hasConversation, projectEvent, projectTodos, replaySession, replayTodos } from './transcript.ts'
-import { collectTurnSpans, reduceTurnSpans } from './taskboard.tsx'
+import { collectTurnEntries, reduceTurnEntries } from './taskboard.tsx'
 
 /** The most recent approval policy recorded in the log, or the default. */
 function lastApprovalPolicy(session: Session): 'ask' | 'never' {
@@ -119,9 +119,9 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let todos: TodoList | null = replayTodos(session)
   // Prompts typed while the agent runs; the idle edge drains them FIFO.
   let queued: readonly string[] = []
-  // Board data: recent per-turn wall-clock spans folded from the durable log,
+  // Board data: the per-turn conversation timeline folded from the durable log,
   // and the Ctrl+Alt board toggle the renderer flips.
-  let turnSpans = collectTurnSpans(session.snapshotEvents())
+  let turnTimeline = collectTurnEntries(session.snapshotEvents())
   let boardOpen = false
   const tokens = countDurableTokens(session)
   const pickerItems = catalog
@@ -523,9 +523,9 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     // return below.
     refreshOccupancy()
     todos = projectTodos(todos, event)
-    const nextSpans = reduceTurnSpans(turnSpans, event)
-    if (nextSpans !== turnSpans) {
-      turnSpans = nextSpans
+    const nextEntries = reduceTurnEntries(turnTimeline, event)
+    if (nextEntries !== turnTimeline) {
+      turnTimeline = nextEntries
       snapshot = null
       notify()
     }
@@ -591,7 +591,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           todos,
           queued: [...queued],
           boardOpen,
-          turnSpans,
+          turnTimeline,
           choicePicker,
           connectWizard: connect.state,
           transcriptEpoch,
