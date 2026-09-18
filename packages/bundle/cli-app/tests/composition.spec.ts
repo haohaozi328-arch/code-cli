@@ -357,8 +357,13 @@ describe('cli-app through a real composition', () => {
       frame.includes('demo-ok') && frame.includes('all done'))
     // The real token meter feeds the composer's measurement line: cumulative
     // usage plus the context ring against the logged route capacity.
-    await waitForFrame(composition, frame =>
-      frame.includes(COPY.tokenUsageLabel) && frame.includes(`${COPY.contextLabel} ○ 0%`))
+    // The classic status line exceeds ink-testing-library's default 80-column
+    // frame, so the ring's `%` can wrap or clip at the edge; assert on the
+    // meter facts in their whitespace-tolerant form instead of exact layout.
+    await waitForFrame(composition, (frame) => {
+      const compact = frame.replace(/\s+/g, '')
+      return compact.includes(COPY.tokenUsageLabel) && compact.includes(`${COPY.contextLabel}○0`)
+    })
     vm.send('/quit')
     await expect(composition.exited).resolves.toBe(0)
 

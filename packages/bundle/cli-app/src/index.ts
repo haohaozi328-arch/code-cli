@@ -317,15 +317,11 @@ async function run(ctx: Context, config: Config): Promise<void> {
       const parentCwd = agent.session.header.cwd
       vm.dispose()
       await handle.dispose()
-      // Erase the previous session viewport AFTER disposal so any final React
-      // renders triggered by dispose are also cleared. The old code cleared
-      // before dispose, which left the old conversation visible in scrollback
-      // because disposal could trigger one last Ink paint of the stale tree.
-      // See: `/new` scrolls up showing the previous conversation.
-      ink.clearViewport?.()
       live = null
       switch (requested.type) {
         case 'quit':
+          // Unmount erases Ink's own output and no session follows, so a
+          // viewport clear here would only flash a blank frame before exit.
           ink.unmount()
           exit(0)
           return
@@ -348,6 +344,12 @@ async function run(ctx: Context, config: Config): Promise<void> {
           }
           break
       }
+      // Session boundary: erase the retired viewport AFTER disposal so any
+      // final React renders triggered by dispose are also cleared. The old
+      // code cleared before dispose, which left the old conversation visible
+      // in scrollback because disposal could trigger one last Ink paint of
+      // the stale tree. See: `/new` scrolls up showing the previous conversation.
+      ink.clearViewport?.()
     }
   } finally {
     if (live !== null) {

@@ -41,8 +41,8 @@ function SessionRow(props: {
     <Text color={selected ? theme.brand : theme.muted} bold={selected}>
       {selected ? `${SELECT_MARKER} ` : '  '}
       {stem}
-      {where !== '' ? `  路  ${where}` : ''}
-      <Text dimColor>  路  {time}{item.parentSession !== null ? '  路  fork' : ''}</Text>
+      {where !== '' ? `  ·  ${where}` : ''}
+      <Text dimColor>  ·  {time}{item.parentSession !== null ? '  ·  fork' : ''}</Text>
     </Text>
   )
 }
@@ -102,7 +102,7 @@ export function ChoiceList(props: {
     <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} marginBottom={1}>
       <Box marginLeft={1} marginTop={1}>
         <Text color={theme.brand} bold>{title}</Text>
-        <Text color={theme.muted}>  路  {COPY.choiceHint}</Text>
+        <Text color={theme.muted}>  ·  {COPY.choiceHint}</Text>
       </Box>
       {items.length === 0 && <Text color={theme.muted} dimColor>  {COPY.choiceEmpty}</Text>}
       {visible.map((item, index) => {
@@ -133,7 +133,7 @@ export function ApprovalModal(props: {
     <Box flexDirection="column" borderStyle="double" borderColor={theme.warn} marginBottom={1}>
       <Box marginLeft={1} marginTop={1}>
         <Text color={theme.warn} bold>{COPY.approvalTitle}</Text>
-        {prompt.reason !== undefined && <Text color={theme.muted}>  路  {prompt.reason}</Text>}
+        {prompt.reason !== undefined && <Text color={theme.muted}>  ·  {prompt.reason}</Text>}
       </Box>
       <Box marginLeft={1} marginBottom={1}>
         <Text color={theme.text}>{prompt.toolName}</Text>
@@ -159,7 +159,7 @@ export function CommandMenu(props: {
         <Text key={candidate.name} color={index === selected ? theme.brand : theme.muted} bold={index === selected}>
           {index === selected ? `${SELECT_MARKER} ` : '  '}
           {candidate.name}
-          <Text dimColor>  {candidate.hint}{candidate.arg !== undefined ? `  路  ${candidate.arg}` : ''}</Text>
+          <Text dimColor>  {candidate.hint}{candidate.arg !== undefined ? `  ·  ${candidate.arg}` : ''}</Text>
         </Text>
       ))}
     </Box>
@@ -176,7 +176,7 @@ export function ConnectPrompt(props: {
     <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} marginBottom={1} paddingX={1}>
       <Text color={theme.brand} bold>/connect</Text>
       <Text color={theme.text}>{connectPrompt(wizard.step, wizard.provider)}</Text>
-      <Text color={theme.muted} dimColor>Enter 纭 路 Esc 鍙栨秷</Text>
+      <Text color={theme.muted} dimColor>Enter 确认 · Esc 取消</Text>
     </Box>
   )
 }

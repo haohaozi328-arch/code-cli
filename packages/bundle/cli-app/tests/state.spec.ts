@@ -134,7 +134,7 @@ async function bench(
     agent,
     session,
     sessionLabel: 'vm-test · work',
-    catalog: [{ sessionId: 'other-session', title: 'Other', cwd: null, createdAt: 1, parentSession: null }],
+    catalog: [{ sessionId: 'other-session', title: 'Other', cwd: null, createdAt: 1, updatedAt: 1, blank: false, parentSession: null }],
     approvalBus: createApprovalBus(),
     flush,
     ...host,

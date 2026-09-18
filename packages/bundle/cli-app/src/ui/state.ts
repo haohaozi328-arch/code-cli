@@ -112,9 +112,6 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let pendingApproval: ApprovalPrompt | null = null
   let transcriptEpoch = 0
   let noticeSeq = 0
-  // Set once a real prompt is submitted; the durable user message may not have
-  // landed yet, and an untouched session must stay reusable by `/new`.
-  let promptSubmitted = false
   const tokens = countDurableTokens(session)
   const pickerItems = catalog
   const meter = ctx.get('tokenMeter')
@@ -184,7 +181,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   /**
    * Re-read context occupancy from the token meter and the durable route
    * record. The meter prices the surface, so a compaction that shadows a range
-   * lowers this figure as soon as its events land 鈥?before the next request
+   * lowers this figure as soon as its events land —before the next request
    * reports usage.
    */
   const refreshOccupancy = (): void => {
@@ -271,7 +268,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       ]
       : permissionService.names.map((name) => {
         const option = permissionService.optionOf(name)
-        return { label: option.description === undefined ? option.name : `${option.name} 鈥?${option.description}`, value: option.value }
+        return { label: option.description === undefined ? option.name : `${option.name} —${option.description}`, value: option.value }
       })
     setChoicePicker({ kind: 'policy', title: COPY.choiceTitlePolicy, items })
   }
@@ -365,6 +362,9 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         // (user message + assistant reply). Otherwise just clear the view.
         if (hasConversation(session)) exitFn({ type: 'new' })
         else resetTranscriptView()
+        return
+      case '/fork':
+        exitFn({ type: 'fork' })
         return
       case '/sessions':
       case '/resume':
@@ -564,7 +564,6 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         return
       }
       setError(null)
-      promptSubmitted = true
       const message = createUserMessage({
         content: [{ type: 'text', text }],
         source: { kind: 'user' },

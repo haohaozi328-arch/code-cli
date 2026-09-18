@@ -1,7 +1,7 @@
 ﻿/**
  * Session-surface helpers for the terminal app: persisted-session catalog
  * (id/title/cwd/time/event count), fork-seed collection over a live session
- * log, and display formatting. Pure reads 鈥?no session is opened for the
+ * log, and display formatting. Pure reads —no session is opened for the
  * catalog; titles come from the persisted projection cache when available.
  * @module @dsh-external/dsh-cli-app/sessions
  */
@@ -74,7 +74,11 @@ export async function listPersistedSessions(ctx: Context): Promise<SessionSummar
 /** Read the list metadata projection without opening the session. */
 function cachedListMetadata(cache: unknown, header: SessionHeader): { blank: boolean; lastPromptAt: number | null } | undefined {
   const service = cache as {
-    cachedSnapshot?(meta: SessionHeader, inheritedEventCount: SessionLogOffset, keys?: readonly string[]): { values: Record<string, unknown> } | undefined
+    cachedSnapshot?(
+      meta: SessionHeader,
+      inheritedEventCount: SessionLogOffset,
+      keys?: readonly string[],
+    ): { values: Record<string, unknown> } | undefined
   }
   const snapshot = service.cachedSnapshot?.(header, SessionLogOffset(0), ['sessionListMetadata'])
   const value = snapshot?.values['sessionListMetadata']
@@ -170,5 +174,5 @@ export function sessionLabel(summary: Pick<SessionSummary, 'title' | 'sessionId'
     : summary.sessionId
   const stem = summary.title ?? raw.slice(0, 12)
   const where = shortCwd(summary.cwd)
-  return where === '' ? stem : `${stem} 路 ${where}`
+  return where === '' ? stem : `${stem} · ${where}`
 }
