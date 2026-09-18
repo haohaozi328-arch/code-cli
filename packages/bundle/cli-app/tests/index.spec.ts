@@ -125,6 +125,7 @@ async function bench(
         return {
           unmount: () => { order.push('unmount') },
           clearViewport: () => { order.push('clearViewport') },
+          clearScreen: () => { order.push('clearScreen') },
           rerender: (next: ReactElement) => {
             order.push('rerender')
             drive(next, renders++)
@@ -206,6 +207,8 @@ describe('cli-app glue', () => {
     expect(first).toBeDefined()
     expect(second?.meta?.parentSession).toBe(first?.sessionId)
     expect(second?.meta?.isSeeded).toBeUndefined() // empty parent log → unseeded fork
+    // The boundary wipe erases the scrollback, not just the viewport.
+    expect(test.order).toContain('clearScreen')
     await test.ctx.fiber.dispose()
   })
 

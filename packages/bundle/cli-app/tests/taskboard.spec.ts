@@ -99,11 +99,11 @@ describe('collectTurnSpans', () => {
 })
 
 describe('isBoardToggle', () => {
-  it('matches only the Ctrl+Alt chord', () => {
-    expect(isBoardToggle({ ctrl: true, meta: true })).toBe(true)
-    expect(isBoardToggle({ ctrl: true, meta: false })).toBe(false)
-    expect(isBoardToggle({ ctrl: false, meta: true })).toBe(false)
-    expect(isBoardToggle({ ctrl: false, meta: false })).toBe(false)
+  it('matches only the Ctrl+B chord', () => {
+    expect(isBoardToggle('b', { ctrl: true, meta: false })).toBe(true)
+    expect(isBoardToggle('b', { ctrl: true, meta: true })).toBe(false)
+    expect(isBoardToggle('b', { ctrl: false, meta: false })).toBe(false)
+    expect(isBoardToggle('t', { ctrl: true, meta: false })).toBe(false)
   })
 })
 

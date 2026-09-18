@@ -22,9 +22,16 @@ export const TURN_SPAN_LIMIT = 12
 /** The minimal key facts the board renders; `ReturnType<ViewModel['getState']>`. */
 type BoardState = ReturnType<ViewModel['getState']>
 
-/** The keyboard chord that swaps the board in and out. */
-export function isBoardToggle(key: { ctrl: boolean; meta: boolean }): boolean {
-  return key.ctrl && key.meta
+/**
+ * The keyboard chord that swaps the board in and out: Ctrl+B. A plain control
+ * character by design — Windows Terminal encodes Alt+letter as `ESC letter`,
+ * so a Ctrl+Alt+letter chord reaches ink as plain Ctrl+letter (its keypress
+ * parser never sets `meta` for that shape) and the chord is unreachable.
+ * @param name - the parsed key name the useInput callback received.
+ * @param key - the ink modifier flags for the same event.
+ */
+export function isBoardToggle(name: string, key: { ctrl: boolean; meta: boolean }): boolean {
+  return key.ctrl && !key.meta && name === 'b'
 }
 
 /** `HH:MM` local clock label for a durable event timestamp. */

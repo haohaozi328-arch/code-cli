@@ -30,7 +30,7 @@ import { App } from './ui/index.ts'
 import { resolveChrome } from './ui/chrome.ts'
 import { resolveTheme } from './ui/theme.ts'
 import { installResizeReflow } from './ui/resize.ts'
-import { CLEAR_VIEWPORT } from './ui/terminal.ts'
+import { CLEAR_SCREEN, CLEAR_VIEWPORT } from './ui/terminal.ts'
 import { registerSessionListProjection } from './list-projection.ts'
 import { collectForkSeed, listPersistedSessions, sessionLabel } from './sessions.ts'
 import type { ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
@@ -46,6 +46,8 @@ export interface InkSurface {
   unmount(): void
   /** Erase Ink's dynamic output and clear the visible viewport; absent on test doubles. */
   clearViewport?(): void
+  /** Clear the visible viewport AND the terminal scrollback; absent on test doubles. */
+  clearScreen?(): void
 }
 
 /** The terminal streams one Ink surface renders on. */
@@ -82,6 +84,12 @@ export function renderApp(element: React.ReactElement, streams: RenderStreams): 
       // the next render repaints from a clean cursor. Scrollback is kept.
       instance.clear()
       streams.stdout.write(CLEAR_VIEWPORT)
+    },
+    clearScreen: () => {
+      // The session-boundary wipe: also erase the scrollback, so the retired
+      // conversation cannot be scrolled back into view above the new session.
+      instance.clear()
+      streams.stdout.write(CLEAR_SCREEN)
     },
   }
 }
@@ -345,12 +353,13 @@ async function run(ctx: Context, config: Config): Promise<void> {
           }
           break
       }
-      // Session boundary: erase the retired viewport AFTER disposal so any
-      // final React renders triggered by dispose are also cleared. The old
-      // code cleared before dispose, which left the old conversation visible
-      // in scrollback because disposal could trigger one last Ink paint of
-      // the stale tree. See: `/new` scrolls up showing the previous conversation.
-      ink.clearViewport?.()
+      // Session boundary: wipe the retired viewport AND its scrollback AFTER
+      // disposal so any final React renders triggered by dispose are also
+      // cleared, and the old conversation can no longer be scrolled back into
+      // view. Falls back to the viewport-only clear on surfaces without the
+      // scrollback erase (test doubles).
+      if (ink.clearScreen !== undefined) ink.clearScreen()
+      else ink.clearViewport?.()
     }
   } finally {
     if (live !== null) {

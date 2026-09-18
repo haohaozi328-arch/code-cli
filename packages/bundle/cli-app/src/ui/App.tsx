@@ -200,9 +200,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   useInput((chunk, key) => {
     const lower = chunk.toLowerCase()
-    // Ctrl+Alt swaps the conversation for the full-screen task board; the
-    // same chord returns. While the board is up it swallows every other key.
-    if (isBoardToggle(key)) {
+    // Ctrl+B swaps the conversation for the full-screen task board; the same
+    // chord returns. While the board is up it swallows every other key.
+    if (isBoardToggle(lower, key)) {
       vm.toggleBoard()
       return
     }

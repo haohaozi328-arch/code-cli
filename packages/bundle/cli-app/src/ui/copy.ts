@@ -59,7 +59,7 @@ export const COPY = {
   queuedLabel: '已排队',
 
   boardTitle: 'dsh-taskboard',
-  boardHint: 'Ctrl+Alt 返回对话 · /help 全部键位',
+  boardHint: 'Ctrl+B 返回对话 · /help 全部键位',
   boardTurnNow: '当前回合',
   boardLastTurn: '上回合',
   boardTimeline: '回合时间线',
@@ -115,7 +115,7 @@ export const HELP_TEXT: string = [
   '  /compact /feedback /goal /plan   上下文、反馈、目标与计划命令',
   '  /quit, /exit      退出会话（也可使用 Ctrl+D）',
   '  Ctrl+T            折叠或展开任务面板',
-  '  Ctrl+Alt          切换任务进程时间看板（dsh-taskboard）',
+  '  Ctrl+B            切换任务进程时间看板（dsh-taskboard）',
   '',
   '助手运行时，按 Ctrl+C 可停止当前任务。',
   '运行中输入的消息会自动排队，回合结束后依次发送。',

@@ -48,7 +48,7 @@ The `cli` profile is a user-layer directory (`~/.dsh/profiles/cli`) whose bundle
 - A metered status line: `token 42.5/s` throughput, cumulative usage, and a context-occupancy ring that steps down the moment compaction lands.
 - A braille spinner with elapsed time while the agent runs; prompts typed while running queue FIFO and drain one per idle edge (slash commands are never queued).
 - Two layouts over one interaction kernel: `classic` (single column, `❯` prompt, bottom status line) and the opencode style (centered welcome for empty sessions, full-width conversation afterwards).
-- A full-screen task board (`dsh-taskboard`): `Ctrl+Alt` swaps the conversation for a board showing the task checklist, a per-turn timeline with wall-clock spans, the live running elapsed time, queue depth, and the usage/context readouts; the same chord returns.
+- A full-screen task board (`dsh-taskboard`): `Ctrl+B` swaps the conversation for a board showing the task checklist, a per-turn timeline with wall-clock spans, the live running elapsed time, queue depth, and the usage/context readouts; the same chord returns.
 
 -----
 
@@ -116,7 +116,7 @@ Current constraints, registered honestly rather than silently:
 - **Session surface**: resume picker, `/new`, `/fork`, titles, session label; the list is capped at 50 entries, newest first.
 - **First picker open after an upgrade**: list metadata for sessions persisted before the picker fix is derived by one read-only pass over the uncached logs (seconds, once per process); each session's next open caches the facts for zero-I/O listings afterwards.
 - **`/new` and empty sessions**: `/new` opens a new session only when the current one has real conversation; an untouched session is treated as "reset the current view", so repeated `/new` no longer accumulates sessions. Exception: leaving a used session for one that never receives input still persists that empty session at handle close (official persistence has no delete API) — at most one at a time.
-- **Session-boundary clear**: `/new`, `/sessions`, `/fork`, `/model` clear the current viewport before writing the new session's static transcript (scrollback stays).
+- **Session-boundary clear**: `/new`, `/sessions`, `/fork`, `/model` clear the current viewport and erase the scrollback (xterm `ESC[3J`) before writing the new session's static transcript, so the retired conversation can no longer be scrolled back into view; `/clear` still keeps the scrollback.
 - **Markdown subset**: inline code/**bold**/*italic*, fenced code, headings, lists, quotes; tables and links are not rendered.
 - **Reasoning fold**: collapsed to one line by default; `Ctrl+R` expands/collapses the latest entry.
 - **tool-call argument streaming preview**: transient preview on the streaming row; the landed card takes over.
