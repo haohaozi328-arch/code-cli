@@ -129,6 +129,11 @@
       "@deepseek-ai/dsh-client-*/invariant": ["./packages/client/*/src/invariant.ts"],
       "@deepseek-ai/dsh-headless/startup": ["./packages/bundle/headless/src/startup.ts"],
       "@deepseek-ai/dsh-web-app/startup": ["./packages/bundle/web-app/src/startup.ts"],
+      // Out-of-tree CLI frontend (this checkout's custom bundle, not official):
+      // its scope never matches the generator's dsh- prefix, so it lives here
+      // by hand and survives every regenerate.
+      "@dsh-external/dsh-cli-app": ["./packages/bundle/cli-app/src"],
+      "@dsh-external/dsh-cli-app/startup": ["./packages/bundle/cli-app/src/startup.ts"],
       "@deepseek-ai/dsh-client-*/client": ["./packages/client/*/src/client"],
       // One wildcard maps every @deepseek-ai/dsh-<name> to its source. Package
       // dir names are unique across groups, so first-on-disk-wins resolution is

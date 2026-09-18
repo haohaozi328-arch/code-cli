@@ -1,0 +1,49 @@
+# The dsh-cli-app bundle patch: an interactive terminal (TUI) surface directly
+# over dsh-base. It mounts no Host, HTTP server, Web runtime, or browser
+# plugin. The base keeps its process-wide agent-plane rows exactly for this
+# shape — a single-session TUI composes its agent process-wide, which is why
+# the Web surface (multi-session) disables them and moves the plane behind
+# agent presets instead. cli-app therefore disables nothing here.
+#
+# An ordinary provider plugin (`cli-startup`) injects `cmdlineArgs`, parses
+# `--resume/--model/--cwd/--theme` and this app's `--help`, then the glue
+# plugin (`cli-app`) creates or resumes an Agent through the core registry,
+# mounts the Ink UI, and owns the process lifetime.
+
+# ── surface-specific values the base deliberately omits (same restatement as
+#    headless/web) ────────────────────────────────────────────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+- id: tools
+  config:
+    # Keep the same temporary process-wide PTC mode opt-in as the other surfaces.
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+# ── terminal-only host rows ─────────────────────────────────────────────────
+
+- insert:
+    # PTC mode is a core execution capability, not a Web component.
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    # Parses the invocation's inner arguments into an ordinary service.
+    - id: cli-startup
+      name: '@dsh-external/dsh-cli-app/startup'
+
+    # The terminal glue: waits for the Loader tree, creates or resumes the
+    # single Agent (default model from the agent-default-model row unless
+    # --model overrides it), mounts the Ink UI, and requests app exit when
+    # the UI disposes.
+    - id: cli-app
+      name: '@dsh-external/dsh-cli-app'
+      inject: [cliStartup]
+      config:
+        resumeSessionId: !!js ctx.cliStartup.resumeSessionId || ''
+        cwd: !!js ctx.cliStartup.cwd || process.cwd()
+        model: !!js ctx.cliStartup.model || ''
+        theme: !!js ctx.cliStartup.theme || 'auto'
+        ui: !!js ctx.cliStartup.ui || 'classic'

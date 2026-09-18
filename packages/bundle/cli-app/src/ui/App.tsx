@@ -1,0 +1,470 @@
+/**
+ * Ink application root for the dsh terminal session.
+ *
+ * Two layout chromes share one view model and one keyboard contract:
+ *   - `classic`   the original single-column terminal look.
+ *   - `opencode`  an opencode-style frame: a centered welcome page for an empty
+ *     session, then a left-aligned transcript once a conversation begins.
+ *
+ * The transcript is split between Ink's `<Static>` output and the live region.
+ * Committed rows are written once and stay in the terminal's own scrollback, so
+ * resizing or scrolling never repaints them; only the streaming row, the modal
+ * overlays, and the input line are redrawn. That split is what keeps the app
+ * correct on resize and gives the terminal native mouse-wheel scrolling.
+ * @module @dsh-external/dsh-cli-app/ui/App
+ */
+
+import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { Box, Static, Text, useInput, useStdout } from 'ink'
+import { assertNever } from '@deepseek-ai/dsh-util-values'
+import { COPY, WORDMARK } from './copy.ts'
+import type { UiMessage, ViewModel } from './model.ts'
+import { COMMAND_HINTS } from './state.ts'
+import { splitTranscript } from './transcript.ts'
+import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker } from './overlays.tsx'
+import { MessageRow } from './messages.tsx'
+import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
+import type { ThemeTokens } from './theme.ts'
+import type { UiChrome } from './chrome.ts'
+
+/** Widest the opencode welcome column grows before the terminal keeps the rest as side air. */
+const OPENCODE_COLUMN = 104
+/** Smallest usable centered column; below this the terminal width wins to avoid clipping. */
+const OPENCODE_MIN_COLUMN = 44
+/** Keep a large paste from turning the prompt into a multi-screen repaint; the full buffer is preserved. */
+const INPUT_PREVIEW_LIMIT = 240
+
+/** Colours of the welcome wordmark, one per glyph. */
+const WORDMARK_COLORS: readonly string[] = ['#9BE800', '#A9EA1A', '#B9EC43', '#C9E98A']
+
+/** Collapse a multi-line buffer into the single prompt line. */
+function previewInput(value: string): string {
+  const compact = value.replace(/\r?\n/g, COPY.inputNewlineMark)
+  if (compact.length <= INPUT_PREVIEW_LIMIT) return compact
+  return `${compact.slice(0, INPUT_PREVIEW_LIMIT)}…`
+}
+
+/** Follow terminal size: width drives the centered column, rows drive the welcome offset. */
+function useTerminalDims(): { columns: number; rows: number } {
+  const { stdout } = useStdout()
+  const [columns, setColumns] = useState(stdout.columns)
+  const [rows, setRows] = useState(stdout.rows)
+  useEffect(() => {
+    const onResize = (): void => {
+      setColumns(stdout.columns)
+      setRows(stdout.rows)
+    }
+    stdout.on('resize', onResize)
+    return () => { stdout.off('resize', onResize) }
+  }, [stdout])
+  return { columns, rows }
+}
+
+/** Centered-column width for the opencode welcome page. */
+function columnWidthFor(columns: number): number {
+  // Never let the centered panel be wider than the terminal: a minimum wider
+  // than the viewport would clip, and a resize could leave the previous frame
+  // painted outside Ink's new bounds.
+  if (columns <= OPENCODE_MIN_COLUMN + 2) return Math.max(1, columns)
+  return Math.min(OPENCODE_COLUMN, columns - 2)
+}
+
+/** Clamp a list cursor onto its current item count. */
+function clampIndex(index: number, length: number): number {
+  return Math.min(index, Math.max(0, length - 1))
+}
+
+/** Bottom status line for the classic layout. */
+function StatusBar(props: { state: ReturnType<ViewModel['getState']>; theme: ThemeTokens }): React.JSX.Element {
+  const { state, theme } = props
+  return (
+    <Box justifyContent="space-between">
+      <Text color={theme.muted} dimColor>
+        {state.running ? <Text color={theme.warn}>{COPY.statusRunning}</Text> : <Text color={theme.ok}>{COPY.statusIdle}</Text>}
+        {' · '}{state.modelLabel}{' · '}{state.sessionLabel}
+        <ContextRing state={state} theme={theme} />
+      </Text>
+      <TokenUsageLine state={state} theme={theme} />
+    </Box>
+  )
+}
+
+/** Inline context-window readout: ring fraction plus occupancy, or nothing before a window is known. */
+function ContextRing(props: { state: ReturnType<ViewModel['getState']>; theme: ThemeTokens }): React.JSX.Element | null {
+  const { state, theme } = props
+  const occupancy = state.contextOccupancy
+  if (occupancy === null) return null
+  const band = contextBand(occupancy.percent)
+  const color = band === 'ok' ? theme.ok : band === 'warn' ? theme.warn : theme.error
+  return (
+    <Text color={theme.muted} dimColor>
+      {' · '}{COPY.contextLabel}{' '}
+      <Text color={color}>{contextRing(occupancy.percent)} {occupancy.percent}%</Text>
+    </Text>
+  )
+}
+
+/** Generation throughput and cumulative usage for the current session. */
+function TokenUsageLine(props: { state: ReturnType<ViewModel['getState']>; theme: ThemeTokens }): React.JSX.Element {
+  const { state, theme } = props
+  return (
+    <Text color={theme.muted} dimColor>
+      {COPY.tokenRateLabel} {formatTokenRate(state.tokenRate)}{COPY.tokenRateUnit}
+      {' · '}{COPY.tokenUsageLabel} {formatTokenCount(state.tokens.input + state.tokens.output)}
+    </Text>
+  )
+}
+
+/** App root: static transcript, live region, modals, and the input line. */
+export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome }): React.JSX.Element {
+  const { vm, theme, ui = 'classic' } = props
+  const chrome: UiChrome = ui
+  const state = useSyncExternalStore(vm.subscribe, vm.getState)
+  const [input, setInput] = useState('')
+  const [pickerIndex, setPickerIndex] = useState(0)
+  const [sessionSearch, setSessionSearch] = useState('')
+  const [commandIndex, setCommandIndex] = useState(0)
+  const [choiceIndex, setChoiceIndex] = useState(0)
+  // Key of the assistant row whose reasoning is expanded (default collapsed).
+  const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null)
+
+  const pickerOpen = state.pickerOpen
+  const choicePicker = state.choicePicker
+  const connectWizard = state.connectWizard
+  const pendingApproval = state.pendingApproval
+  const running = state.running
+  const { columns, rows } = useTerminalDims()
+  const columnWidth = columnWidthFor(columns)
+
+  // The static list must be append-only: it is derived from the durable log and
+  // grows as rows settle, never in place.
+  const { committed, live } = useMemo(() => splitTranscript(state.messages), [state.messages])
+
+  const filteredSessions = useMemo(() => {
+    const query = sessionSearch.trim().toLowerCase()
+    if (query === '') return state.pickerItems
+    return state.pickerItems.filter(item =>
+      [item.title ?? '', item.cwd ?? '', item.sessionId].some(value => value.toLowerCase().includes(query)))
+  }, [state.pickerItems, sessionSearch])
+  const safePickerIndex = clampIndex(pickerIndex, filteredSessions.length)
+
+  // Slash-command palette: matched while the buffer starts with '/'.
+  const commandQuery = input.startsWith('/') ? input.toLowerCase() : null
+  const commandMatches = useMemo(
+    () => commandQuery === null ? [] : COMMAND_HINTS.filter(candidate => candidate.name.startsWith(commandQuery)).slice(0, 8),
+    [commandQuery],
+  )
+  const commandMenuOpen = commandQuery !== null && commandMatches.length > 0
+  const effectiveCommandIndex = clampIndex(commandIndex, commandMatches.length)
+  const effectiveChoiceIndex = choicePicker === null ? 0 : clampIndex(choiceIndex, choicePicker.items.length)
+
+  // A picker opening always starts at the newest row; the index never outlives
+  // its catalog snapshot.
+  useEffect(() => {
+    if (pickerOpen) {
+      setPickerIndex(0)
+      setSessionSearch('')
+    }
+  }, [pickerOpen])
+  useEffect(() => {
+    if (choicePicker !== null) setChoiceIndex(0)
+  }, [choicePicker])
+  // The command menu follows the buffer; reset the highlight on every edit.
+  useEffect(() => {
+    setCommandIndex(0)
+  }, [input])
+
+  useInput((chunk, key) => {
+    const lower = chunk.toLowerCase()
+    // Priority 1: tool approval question.
+    if (pendingApproval !== null) {
+      if (lower === 'a') vm.resolveApproval('allowed-once')
+      else if (lower === 'r') vm.resolveApproval('rejected')
+      else if (key.escape || lower === 'c') vm.resolveApproval('cancelled')
+      return
+    }
+    // Priority 2: session modal. Arrow keys only move the filtered list.
+    if (pickerOpen) {
+      const count = filteredSessions.length
+      if (key.upArrow) {
+        setPickerIndex(prev => (count === 0 ? 0 : (prev - 1 + count) % count))
+        return
+      }
+      if (key.downArrow) {
+        setPickerIndex(prev => (count === 0 ? 0 : (prev + 1) % count))
+        return
+      }
+      if (key.return) {
+        const item = filteredSessions[safePickerIndex]
+        if (item !== undefined) vm.requestSwitch(item.sessionId)
+        return
+      }
+      if (key.escape || (key.ctrl && lower === 'c')) {
+        vm.closePicker()
+        return
+      }
+      if (key.backspace || key.delete) {
+        setSessionSearch(prev => prev.slice(0, -1))
+        setPickerIndex(0)
+        return
+      }
+      if (chunk !== '' && !key.ctrl && !key.meta) {
+        setSessionSearch(prev => prev + chunk)
+        setPickerIndex(0)
+      }
+      return
+    }
+    // Priority 3: /model, /perm, and /connect choice lists.
+    if (choicePicker !== null) {
+      const count = choicePicker.items.length
+      if (key.upArrow) {
+        setChoiceIndex(prev => (count === 0 ? 0 : (prev - 1 + count) % count))
+        return
+      }
+      if (key.downArrow) {
+        setChoiceIndex(prev => (count === 0 ? 0 : (prev + 1) % count))
+        return
+      }
+      if (key.return) {
+        const item = choicePicker.items[effectiveChoiceIndex]
+        if (item !== undefined) {
+          switch (choicePicker.kind) {
+            case 'model':
+              vm.pickModel(item.value)
+              break
+            case 'policy':
+              vm.pickPolicy(item.value)
+              break
+            case 'connect-provider':
+              vm.pickConnectProvider(item.value)
+              break
+            case 'connect-api':
+              vm.pickConnectApi(item.value)
+              break
+            default:
+              assertNever(choicePicker.kind)
+          }
+          setInput('')
+        }
+        return
+      }
+      if (key.escape || (key.ctrl && lower === 'c')) {
+        vm.closeChoicePicker()
+        return
+      }
+      return
+    }
+    // Priority 4: the /connect text-field wizard.
+    if (connectWizard !== null) {
+      if (key.return) {
+        vm.submitConnectInput(input)
+        setInput('')
+        return
+      }
+      if (key.escape || (key.ctrl && lower === 'c')) {
+        vm.cancelConnect()
+        setInput('')
+        return
+      }
+      if (key.backspace || key.delete) {
+        setInput(prev => prev.slice(0, -1))
+        return
+      }
+      if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return
+      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      return
+    }
+    // Priority 5: slash-command palette.
+    if (commandMenuOpen) {
+      if (key.upArrow) {
+        setCommandIndex(prev => (prev - 1 + commandMatches.length) % commandMatches.length)
+        return
+      }
+      if (key.downArrow) {
+        setCommandIndex(prev => (prev + 1) % commandMatches.length)
+        return
+      }
+      if (key.return) {
+        const chosen = commandMatches[effectiveCommandIndex]
+        if (chosen !== undefined) {
+          const line = input.trimEnd()
+          setInput('')
+          // Execute through the same dispatch the typed line would use.
+          vm.send(chosen.name + (line.length > chosen.name.length ? line.slice(chosen.name.length) : ''))
+        }
+        return
+      }
+      if (key.escape || (key.ctrl && lower === 'c')) {
+        setInput('')
+        return
+      }
+      // Editing keys still operate on the buffer (backspace / typing filters).
+      if (key.backspace || key.delete) {
+        setInput(prev => prev.slice(0, -1))
+        return
+      }
+      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      return
+    }
+    // Reserved control chords. Ink reports ctrl+c as key.ctrl with the literal
+    // input character 'c' in the chunk.
+    if (key.ctrl && lower === 'c') {
+      if (running) vm.stop()
+      else vm.quit()
+      return
+    }
+    if (key.ctrl && (lower === 'd' || lower === 'q')) {
+      vm.quit()
+      return
+    }
+    if (key.return) {
+      const line = input.trimEnd()
+      setInput('')
+      if (line !== '') vm.send(line)
+      return
+    }
+    // Ctrl+R toggles the last assistant row's reasoning while idle.
+    if (!running && input === '' && key.ctrl && lower === 'r' && !key.meta) {
+      const lastReasoned = [...state.messages].reverse().find(message =>
+        message.role === 'assistant' && message.reasoning !== '' && message.status === 'done')
+      if (lastReasoned !== undefined) {
+        setExpandedReasoning(prev => (prev === lastReasoned.key ? null : lastReasoned.key))
+      }
+      return
+    }
+    // Non-printable navigation / editing keys.
+    if (key.backspace || key.delete) {
+      setInput(prev => prev.slice(0, -1))
+      return
+    }
+    if (key.escape || key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) return
+    // Anything else printable lands in the buffer, including IME-composed text
+    // and shifted symbols. Ctrl/meta chords were handled above.
+    if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+  })
+
+  const renderRow = (message: UiMessage): React.JSX.Element => (
+    <MessageRow
+      key={message.key}
+      message={message}
+      theme={theme}
+      reasoningExpanded={expandedReasoning === message.key}
+      chrome={chrome}
+    />
+  )
+
+  // Ink writes new static items permanently above the live region; re-keying on
+  // the session (and on /clear) rebuilds that list instead of repainting it.
+  const transcript = (
+    <>
+      <Static key={`${state.sessionId}:${state.transcriptEpoch}`} items={committed}>
+        {renderRow}
+      </Static>
+      <Box flexDirection="column">{live.map(renderRow)}</Box>
+    </>
+  )
+
+  const overlays = (
+    <>
+      {state.error !== null && (
+        <Box marginBottom={1}>
+          <Text color={theme.error}>{COPY.errorGlyph} {state.error}</Text>
+        </Box>
+      )}
+      <ApprovalModal prompt={pendingApproval} theme={theme} />
+      {connectWizard !== null && <ConnectPrompt wizard={connectWizard} theme={theme} />}
+      {choicePicker !== null && (
+        <ChoiceList title={choicePicker.title} items={choicePicker.items} selected={effectiveChoiceIndex} theme={theme} />
+      )}
+      {commandMenuOpen && <CommandMenu matches={commandMatches} selected={effectiveCommandIndex} theme={theme} />}
+    </>
+  )
+
+  const classicInput = (
+    <Box marginTop={1}>
+      <Text color={theme.brand}>❯ </Text>
+      {input === ''
+        ? <Text color={theme.muted} dimColor>{COPY.classicInputPlaceholder}</Text>
+        : <Text color={theme.text}>{previewInput(input)}</Text>}
+      <Text color={theme.brand}>{running || input !== '' ? '' : '▌'}</Text>
+    </Box>
+  )
+
+  const opencodeComposer = (
+    <>
+      <Box borderStyle="round" borderColor={theme.brand} marginTop={1} paddingX={1} flexDirection="column">
+        <Box>
+          <Text color={theme.brand}>{'> '}</Text>
+          {input === ''
+            ? <Text color={theme.muted} dimColor>{connectWizard !== null ? '' : COPY.composerPlaceholder}</Text>
+            : <Text color={theme.text}>{previewInput(input)}</Text>}
+          <Text color={theme.brand}>{input === '' && !running ? '▌' : ''}</Text>
+        </Box>
+        <Box marginTop={1} justifyContent="space-between">
+          <Text color={theme.muted} dimColor>
+            {state.modelLabel} · {COPY.permissionLabel} <Text color={theme.brand}>{state.permissionPreset}</Text>
+            <ContextRing state={state} theme={theme} />
+          </Text>
+          <Text color={running ? theme.warn : theme.ok}>{running ? COPY.statusRunning : COPY.statusIdle}</Text>
+        </Box>
+      </Box>
+      <Box marginTop={1} justifyContent="flex-end">
+        <TokenUsageLine state={state} theme={theme} />
+      </Box>
+    </>
+  )
+
+  if (chrome === 'opencode') {
+    // /sessions focuses the picker over the code surface.
+    if (pickerOpen) {
+      return (
+        <Box width="100%" height={Math.max(8, rows - 2)} alignItems="center" justifyContent="center">
+          <Box width={Math.min(columnWidth, 78)}>
+            <SessionPicker items={filteredSessions} selected={safePickerIndex} search={sessionSearch} theme={theme} />
+          </Box>
+        </Box>
+      )
+    }
+    // Empty session: a centered welcome page. The content is measured in rows
+    // so a terminal resize immediately repositions it.
+    if (committed.length === 0 && live.length === 0) {
+      const verticalOffset = Math.max(0, Math.floor((rows - 10) / 2))
+      return (
+        <Box flexDirection="column" width="100%" marginTop={verticalOffset}>
+          <Box width="100%" justifyContent="center">
+            <Box width={columnWidth} flexDirection="column">
+              <Box justifyContent="center">
+                {WORDMARK.map((glyph, index) => (
+                  <Text key={glyph} color={WORDMARK_COLORS[index] ?? theme.brand} bold>{glyph}</Text>
+                ))}
+              </Box>
+              <Box justifyContent="center" marginTop={1}>
+                <Text color={theme.text}>DeepSeek </Text>
+                <Text color={theme.brand} bold>{COPY.welcomeTagline}</Text>
+              </Box>
+              {overlays}
+              {opencodeComposer}
+            </Box>
+          </Box>
+        </Box>
+      )
+    }
+    return (
+      <Box flexDirection="column" width="100%">
+        {transcript}
+        {overlays}
+        {opencodeComposer}
+      </Box>
+    )
+  }
+
+  return (
+    <Box flexDirection="column">
+      {transcript}
+      {pickerOpen && <SessionPicker items={filteredSessions} selected={safePickerIndex} search={sessionSearch} theme={theme} />}
+      {overlays}
+      {classicInput}
+      <StatusBar state={state} theme={theme} />
+    </Box>
+  )
+}
