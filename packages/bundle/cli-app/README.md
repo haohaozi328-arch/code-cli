@@ -91,6 +91,17 @@ dsh --profile cli --ui opencode   也可临时切到 opencode 布局
 - **上下文环**：`上下文 ◑ 45%`，紧随权限预设右侧（classic 布局在会话标签后）。分子取 `ctx.tokenMeter.measure(session).totalTokens`（下一次请求的 prompt 压力），分母取 durable `request/context` 记录的 `contextWindow`；两者缺一不显示。环按占用分档着色（<60% ok，<85% warn，其余 error）。
 - **压缩自动降档**：token-meter 的表面折叠会按 `compaction/*` 的 shadow price 重新定价，所以压缩落地后占用立即下降，不必等下一次请求上报 usage。
 
+## 任务面板（todo）
+
+agent 调 `todo_write` 写下的任务清单投影自 durable log（与官方 `todos` projection 同一语义：整表替换、新一轮 `turn/start` 清空、`turn/end` 保留到下一轮），面板停靠在输入框上方：
+
+- `[✓]` 已完成（ok 色）、`[•]` 进行中（warn 色）、`[ ]` 待办（muted 色），头部显示 `任务 已完成数/总数`。
+- 全部完成后面板自动隐藏；`Ctrl+T` 随时折叠/展开；resume/fork 后清单从 log 重建。
+
+## 运行指示（spinner）
+
+agent 运行时 composer 右侧显示盲文 spinner（`⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`，80ms/帧）与已用时间（`⠹ 运行中 · 12s`），classic 状态栏同样替换静态「运行中」；帧步进纯函数化（`ui/spinner.ts`），无定时器测试可直接钉住节奏。
+
 ## 命令与键位
 
 ```
@@ -99,10 +110,11 @@ dsh --profile cli --ui opencode   也可临时切到 opencode 布局
 选 /perm → 权限预设选择器（沙箱 + 审批）
 选 /connect → 模型商选择器（主流 + 自定义），再进入分步输入
 
-输入文本 + Enter   发送；运行中普通文本被拒（斜杠命令不受限）
-Ctrl+C             运行中=停止当前轮次；空闲=退出
+输入文本 + Enter   发送；运行中普通文本自动排队，回合结束后依次发送（斜杠命令不受限）
+Ctrl+C             运行中=停止当前轮次（同时清空排队）；空闲=退出
 Ctrl+D / Ctrl+Q    退出
 Ctrl+R             展开/收起最近一条的思考过程
+Ctrl+T             折叠/展开任务面板（todo_write 清单）
 
 命令大小写与前导空格容忍；命令名取首词。
 /model provider/model   也可直接带参一步切换（fork 保留历史）
@@ -140,6 +152,7 @@ pnpm exec vitest run packages/bundle/cli-app/tests  # vitest（无 key，脚本�
 | M5 | Static 转录 + 单 Ink 实例：会话切换与 resize/滚动修正；文案单一来源；模块拆分；`/new` 空会话与切屏修正 | ✅ 74 用例 + REAL-composition |
 | M6 | 状态行改为吞吐 + 用量 + 上下文环（含压缩降档）；命令提示行退场 | ✅ 85 用例 + REAL-composition |
 | M7 | 缩窄终端重排校正：擦除数按新宽度重算，拖动窗口不再残留多份输入框 | ✅ 98 用例 + 真 Ink reflow 断言 |
+| M8 | 会话/动画修复（/fork 恢复、quit 清屏、乱码文案）；opencode 式 spinner + 计时；todo 任务面板（Ctrl+T）；running 排队 | ✅ 106 用例 |
 
 ## Model Experience
 
@@ -165,4 +178,4 @@ The persona restatement is fixed prefix content, so it does not perturb KV-cache
 - **输入**：单行输入（退格可用）；方向键编辑/多行粘贴未实现。
 - **窗口缩放**：缩窄方向已校正（见上）；变宽方向依赖终端是否合并折行（xterm/Windows Terminal 会），不同终端行为不一致，未做校正。活动区外的裸写（插件直接写 stdout）可能被误当作待校正的帧；只影响擦除数，不影响内容。
 - **auto 主题**：固定落深色，亮度探测未做。
-- **覆盖门禁**：本包 98 用例全绿 + REAL-composition + 真 Ink reflow 断言；100%/file 门禁为「贡献官方仓库」前置，非本地运行必需。
+- **覆盖门禁**：本包 106 用例全绿 + REAL-composition + 真 Ink reflow 断言；100%/file 门禁为「贡献官方仓库」前置，非本地运行必需。

@@ -10,7 +10,7 @@
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import { SessionSeq, type Session, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { COPY } from './copy.ts'
-import type { UiMessage } from './model.ts'
+import type { TodoList, UiMessage } from './model.ts'
 
 /**
  * Extract plain text and reasoning from content blocks.
@@ -224,4 +224,34 @@ export function splitTranscript(messages: readonly UiMessage[]): { committed: Ui
   const boundary = visible.findIndex(row => !isSettledRow(row))
   if (boundary === -1) return { committed: visible, live: [] }
   return { committed: visible.slice(0, boundary), live: visible.slice(boundary) }
+}
+
+/**
+ * Fold one durable event into the task-checklist state, mirroring the official
+ * `todos` projection (tool-todo): the latest whole-list `todo/write` snapshot
+ * wins, a new turn clears the checklist while `turn/end` keeps it visible, and
+ * every other event returns the same state reference.
+ * @param todos - current checklist state, treated as immutable.
+ * @param event - the durable event to fold in.
+ * @returns the next checklist state.
+ */
+export function projectTodos(todos: TodoList | null, event: SessionEvent): TodoList | null {
+  if (event.type === 'todo/write') return event.data.todos
+  if (event.type === 'turn/start') return null
+  return todos
+}
+
+/**
+ * Scan the durable log once and project the task-checklist state.
+ * @param session - the session to replay.
+ * @returns the checklist, or null before the first write.
+ */
+export function replayTodos(session: Session): TodoList | null {
+  let todos: TodoList | null = null
+  const length = session.seq
+  for (let seq = 0; seq < length; seq++) {
+    const event = session.eventAt(SessionSeq(seq))
+    if (event !== undefined) todos = projectTodos(todos, event)
+  }
+  return todos
 }

@@ -173,6 +173,17 @@ Status: implemented
 - P3-7 reasoning 折叠区（设计稿）在 M1 平铺直出 —— 已登记 M4 打磨。
 - 二轮评审：tests 4 个类型错误已修（`internals.render` 收窄为 `InkSurface` 两方法接口；`session/event` 测试 emit 补完整 SessionEvent envelope：seq/time/data）；README 测试命令改为 `pnpm exec vitest run packages/bundle/cli-app`（包无独立 test script，官方 style）。tests 由 `tsconfig.client.json` 的宽 glob（`packages/*/*/tests/**/*.ts`）纳入官方 tsc 门禁，类型错误经 `pnpm run typecheck` 暴露并已清零。
 
+## 会话与 UI 修复 + opencode 对齐（2026-09-18）
+
+工作副本停滞期发生一次 GBK 编辑器事故：overlays/sessions/state 三文件被以 GBK 重存，`·`→`路`、`—`→`鈥?`、`确认/取消`→`纭/鍙栨秷`，sessions.spec 的 `·` 断言随之变红；`dispatchCommand` 中 `/fork` 分支丢失（fork 整体失效，index/state 各一用例挂）；`run()` 在 quit 路径也无条件 `clearViewport`（退出闪屏 + 三个 index 用例断言失败）。修复：字节级脚本恢复乱码；恢复 `/fork` case；清屏只在继续下一会话时执行（quit 由 unmount 擦除）；删除死变量 `promptSubmitted`；补 `SessionSummary` 测试字面量缺失字段。composition 的上下文环断言在 80 列 ITL 帧下 `%` 会被换行/裁剪，改为空白容忍匹配。
+
+opencode 对齐新增：
+
+- **spinner**：`ui/spinner.ts` 盲文帧 `⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏`（80ms），运行中在 composer/状态栏显示 `⠹ 运行中 · 12s`（此前运行态完全静止，即用户报告的「UI 动画问题」主体）。
+- **任务面板**：`ui/todos.tsx` + `transcript.ts` 的 `projectTodos/replayTodos`，与官方 `todos` projection 同语义（整表替换、`turn/start` 清空）；停靠输入框上方，`[✓]/[•]/[ ]` 三态，全完成自动隐藏，`Ctrl+T` 折叠。类型经 `@deepseek-ai/dsh-tool-todo` type-only import 接入（peer + dev + tsconfig reference 三处）。
+- **running 排队**：`send()` 运行中不再报错，改为 FIFO 队列，idle 边沿逐条 drain（`submitPrompt` 提取共用）；`stop()`（Ctrl+C）同时清队列。两个旧「still running」用例按新语义改写（行为变更随测试更新）。
+- 键位/帮助/README 同步；106 用例全绿，oxlint 0，tsc 0。
+
 ## 工作副本 merge 提示
 
 merge upstream 时需手动保留：root `package.json` 的 devDeps、`tsconfig.base.json` 手写 alias 区、`tsconfig.host.json` 的 cli-app reference、`packages/bundle/cli-app/tsconfig.json` 里为 permission-presets / credentials / settings / brand / values / token-meter 补的项目引用，以及 `scripts/verify-package-readme-model-experience.ts` 中 cli-app 的间接条目。`packages/bundle/cli-app/` 与 `docs/cli-app/` 为新增未跟踪目录。

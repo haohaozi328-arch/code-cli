@@ -29,6 +29,8 @@ function snapshot(overrides: Partial<UiState>): UiState {
     tokens: { input: 0, output: 0, reasoning: 0 },
     tokenRate: null,
     contextOccupancy: null,
+    todos: null,
+    queued: [],
     choicePicker: null,
     connectWizard: null,
     transcriptEpoch: 0,
@@ -149,6 +151,50 @@ describe('App transcript', () => {
     const frame = instance.lastFrame() ?? ''
     expect(frame).toContain(`token ${COPY.measurementUnavailable}/s`)
     expect(frame).not.toContain(COPY.contextLabel)
+    instance.unmount()
+  })
+
+  it('docks the task panel above the composer while tasks are open', () => {
+    const todos = [
+      { content: 'explore the repo', status: 'completed' },
+      { content: 'patch the parser', status: 'in_progress' },
+      { content: 'run the tests', status: 'pending' },
+    ] as const
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot({ todos: [...todos] })),
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    const frame = instance.lastFrame() ?? ''
+    expect(frame).toContain(COPY.todoTitle)
+    expect(frame).toContain('[✓] explore the repo')
+    expect(frame).toContain('[•] patch the parser')
+    expect(frame).toContain('[ ] run the tests')
+    instance.unmount()
+  })
+
+  it('hides the task panel once every task is completed', () => {
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot({ todos: [{ content: 'done deal', status: 'completed' }] })),
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    expect(instance.lastFrame() ?? '').not.toContain(COPY.todoTitle)
+    instance.unmount()
+  })
+
+  it('notes queued prompts above the composer', () => {
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot({ queued: ['follow up later'] })),
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    const frame = instance.lastFrame() ?? ''
+    expect(frame).toContain(COPY.queuedLabel)
+    expect(frame).toContain('follow up later')
     instance.unmount()
   })
 })

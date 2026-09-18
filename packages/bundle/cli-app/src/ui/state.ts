@@ -29,6 +29,7 @@ import type {
   CommandHint,
   ContextOccupancy,
   ExitRequest,
+  TodoList,
   UiMessage,
   UiState,
   ViewModel,
@@ -36,7 +37,7 @@ import type {
 } from './model.ts'
 import { renderError } from './render-error.ts'
 import { contextOccupancy, estimateLiveTokens, tokensPerSecond } from './status.ts'
-import { blocksToText, countDurableTokens, hasConversation, projectEvent, replaySession } from './transcript.ts'
+import { blocksToText, countDurableTokens, hasConversation, projectEvent, projectTodos, replaySession, replayTodos } from './transcript.ts'
 
 /** The most recent approval policy recorded in the log, or the default. */
 function lastApprovalPolicy(session: Session): 'ask' | 'never' {
@@ -112,6 +113,11 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let pendingApproval: ApprovalPrompt | null = null
   let transcriptEpoch = 0
   let noticeSeq = 0
+  // Task checklist folded from the durable log; the live session/event path
+  // keeps it in step with tool writes.
+  let todos: TodoList | null = replayTodos(session)
+  // Prompts typed while the agent runs; the idle edge drains them FIFO.
+  let queued: readonly string[] = []
   const tokens = countDurableTokens(session)
   const pickerItems = catalog
   const meter = ctx.get('tokenMeter')
@@ -160,6 +166,10 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   const setError = (value: string | null): void => {
     if (error === value) return
     error = value
+    notify()
+  }
+  const setQueued = (next: readonly string[]): void => {
+    queued = next
     notify()
   }
   const setPickerOpen = (value: boolean): void => {
@@ -224,6 +234,22 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     resolveDone(request)
   }
   const requestQuit = (): void => { exitFn({ type: 'quit' }) }
+
+  /** Submit one user prompt: paint the row, wake the agent, flush on settle. */
+  const submitPrompt = (text: string): void => {
+    setError(null)
+    const message = createUserMessage({
+      content: [{ type: 'text', text }],
+      source: { kind: 'user' },
+    })
+    setMessages([...messages, { key: message.id, role: 'user', text, reasoning: '', status: 'done' }])
+    agent.followup(message)
+    setRunning(true)
+    // Flush after the turn settles; never block the UI on it.
+    void agent.whenIdle()
+      .then(() => (flush === undefined ? undefined : flush(session)))
+      .catch((failure: unknown) => { setError(renderError(failure)) })
+  }
 
   /** Validate and request a model-route switch; shared by /model and the picker. */
   const submitModelSpec = (spec: string): void => {
@@ -491,6 +517,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     // shadow price, a new route capacity), so it is re-read before any early
     // return below.
     refreshOccupancy()
+    todos = projectTodos(todos, event)
     // A committed assistant row settles through the assistant-stream end frame,
     // which maps the attempt identity onto its durable seq; folding the raw
     // assistant/message event here too would paint the same row twice.
@@ -514,6 +541,14 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   const disposeStatus = ctx.on('agent/status', ({ agent: subject, status }) => {
     if (subject !== agent) return
     setRunning(status === 'running')
+    // Drain the queue on the idle edge: one prompt per settled turn, the next
+    // one drains when its own turn settles. submitPrompt re-arms `running`
+    // synchronously, so a later idle event can never double-drain.
+    if (status === 'idle' && !running && queued.length > 0) {
+      const [next, ...rest] = queued
+      setQueued(rest)
+      if (next !== undefined) submitPrompt(next)
+    }
   })
 
   const disposeError = ctx.on('agent/error', ({ agent: subject, error: failure }) => {
@@ -542,6 +577,8 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           tokens: { ...tokens },
           tokenRate,
           contextOccupancy: context,
+          todos,
+          queued: [...queued],
           choicePicker,
           connectWizard: connect.state,
           transcriptEpoch,
@@ -560,23 +597,16 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         return
       }
       if (running) {
-        setError('agent is still running; press Ctrl+C to stop it first')
+        // opencode-style queue: a prompt typed while the agent runs drains
+        // FIFO when the current turn settles, instead of bouncing an error.
+        setQueued([...queued, trimmed])
         return
       }
-      setError(null)
-      const message = createUserMessage({
-        content: [{ type: 'text', text }],
-        source: { kind: 'user' },
-      })
-      setMessages([...messages, { key: message.id, role: 'user', text, reasoning: '', status: 'done' }])
-      agent.followup(message)
-      setRunning(true)
-      // Flush after the turn settles; never block the UI on it.
-      void agent.whenIdle()
-        .then(() => (flush === undefined ? undefined : flush(session)))
-        .catch((failure: unknown) => { setError(renderError(failure)) })
+      submitPrompt(text)
     },
     stop() {
+      // Ctrl+C stops everything: the running turn AND anything still queued.
+      setQueued([])
       if (!running) return
       agent.cancel({ kind: 'user' })
     },

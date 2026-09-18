@@ -63,6 +63,9 @@
     },
     {
       "path": "../../boot/cmdline"
+    },
+    {
+      "path": "../../todo/tool-todo"
     }
   ]
 }

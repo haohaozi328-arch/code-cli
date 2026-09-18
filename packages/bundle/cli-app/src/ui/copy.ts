@@ -54,6 +54,10 @@ export const COPY = {
   measurementUnavailable: '—',
   contextLabel: '上下文',
 
+  todoTitle: '任务',
+  todoPanelHint: 'Ctrl+T 折叠/展开任务面板',
+  queuedLabel: '已排队',
+
   welcomeTagline: '终端助手',
 
   injectedPrefix: '〔injected〕',
@@ -100,7 +104,9 @@ export const HELP_TEXT: string = [
   '  /connect          连接模型商（主流 + 自定义）',
   '  /compact /feedback /goal /plan   上下文、反馈、目标与计划命令',
   '  /quit, /exit      退出会话（也可使用 Ctrl+D）',
+  '  Ctrl+T            折叠或展开任务面板',
   '',
   '助手运行时，按 Ctrl+C 可停止当前任务。',
+  '运行中输入的消息会自动排队，回合结束后依次发送。',
   '其他输入内容会直接发送给模型。',
 ].join('\n')

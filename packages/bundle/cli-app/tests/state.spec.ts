@@ -370,7 +370,7 @@ describe('createViewModel actions', () => {
     expect(flush).toHaveBeenCalledTimes(1)
   })
 
-  it('ignores blank input and rejects sends while running with a hint', async () => {
+  it('ignores blank input and queues plain text while running', async () => {
     const { agent, vm } = await bench()
     const followup = vi.spyOn(agent, 'followup')
     vm.send('   ')
@@ -378,9 +378,15 @@ describe('createViewModel actions', () => {
     const { ctx, agent: runAgent, vm: runVm } = await bench()
     ctx.emit('agent/status', { agent: runAgent, status: 'running' })
     runVm.send('queued')
+    // Queued for the next turn instead of bounced with an error.
+    expect(runVm.getState().error).toBeNull()
+    expect(runVm.getState().queued).toEqual(['queued'])
     expect(vm.getState().messages).toHaveLength(0)
-    expect(runVm.getState().error).toContain('still running')
     expect(runVm.getState().messages.filter(m => m.role === 'user')).toHaveLength(0)
+    // The idle edge drains the queue FIFO into a real turn.
+    ctx.emit('agent/status', { agent: runAgent, status: 'idle' })
+    expect(runVm.getState().queued).toEqual([])
+    expect(runVm.getState().messages.filter(m => m.role === 'user')).toHaveLength(1)
   })
 
   it('routes /help, /clear and /quit locally; unknown commands get a hint, not the model', async () => {
@@ -457,6 +463,17 @@ describe('createViewModel actions', () => {
     expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' })
     // oxlint-disable-next-line typescript/unbound-method -- vi.fn captured through the Agent cast
     expect(agent.cancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('stop() drops queued prompts along with the running turn', async () => {
+    const { ctx, agent, vm } = await bench()
+    ctx.emit('agent/status', { agent, status: 'running' })
+    vm.send('later')
+    expect(vm.getState().queued).toEqual(['later'])
+    vm.stop()
+    expect(vm.getState().queued).toEqual([])
+    // oxlint-disable-next-line typescript/unbound-method -- vi.fn captured through the Agent cast
+    expect(agent.cancel).toHaveBeenCalledWith({ kind: 'user' })
   })
 
   it('surfaces agent status and errors; getState snapshots are reference-stable', async () => {
@@ -712,7 +729,7 @@ describe('createViewModel approval', () => {
     vm.send('first prompt')
     ctx.emit('agent/status', { agent, status: 'running' })
     vm.send('normal message')
-    expect(vm.getState().error).toContain('still running')
+    expect(vm.getState().queued).toEqual(['normal message'])
     // /new must still work mid-task; it resets the view without resolving done.
     vm.send(' /New  ') // leading whitespace + case tolerated
     expect(vm.getState().messages).toHaveLength(0)

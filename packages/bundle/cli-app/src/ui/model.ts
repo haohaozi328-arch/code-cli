@@ -10,6 +10,13 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionSummary } from '../sessions.ts'
+// Type-only: carries the `todo/write` SessionEventMap merge and the TodoItem type.
+import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
+
+export type { TodoItem }
+
+/** Whole-list task checklist: the latest `todo/write` snapshot. */
+export type TodoList = readonly TodoItem[]
 
 /** One rendered transcript row. */
 export interface UiMessage {
@@ -110,6 +117,10 @@ export interface UiState {
   tokenRate: number | null
   /** Context-window occupancy for the status ring, or null until a window is known. */
   contextOccupancy: ContextOccupancy | null
+  /** The agent's task checklist projected from `todo/write`, or null before the first write. */
+  todos: TodoList | null
+  /** Prompts typed while the agent ran; drained FIFO when the turn settles. */
+  queued: readonly string[]
   /** An open model/policy/connect choice list, or null. */
   choicePicker: ChoicePickerState | null
   /** Current `/connect` wizard, excluding the secret API key. */

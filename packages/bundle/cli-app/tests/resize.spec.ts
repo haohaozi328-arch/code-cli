@@ -267,6 +267,8 @@ function snapshot(): UiState {
     pendingApproval: null,
     tokens: { input: 0, output: 0, reasoning: 0 },
     tokenRate: null,
+    todos: null,
+    queued: [],
     contextOccupancy: null,
     choicePicker: null,
     connectWizard: null,

@@ -14,11 +14,13 @@ import {
   hasConversation,
   isSettledRow,
   projectEvent,
+  projectTodos,
   replaySession,
+  replayTodos,
   resultSummaryOf,
   splitTranscript,
 } from '../src/ui/transcript.ts'
-import type { UiMessage } from '../src/ui/model.ts'
+import type { TodoList, UiMessage } from '../src/ui/model.ts'
 
 const contexts: Context[] = []
 afterEach(async () => {
@@ -127,5 +129,26 @@ describe('transcript projection', () => {
     expect(argsSummaryOf('not json')).toBe('not json')
     expect(resultSummaryOf([{ type: 'text', text: 'file.txt' }])).toBe('file.txt')
     expect(resultSummaryOf([{ type: 'text', text: '   ' }])).toBe('')
+  })
+
+  it('projects the task checklist: latest write wins, a new turn clears', async () => {
+    const target = await session()
+    target.append('todo/write', { todos: [{ content: 'first', status: 'completed' }] })
+    expect(replayTodos(target)).toEqual([{ content: 'first', status: 'completed' }])
+    // Last write wins: whole-list replacement.
+    target.append('todo/write', { todos: [{ content: 'second', status: 'pending' }] })
+    expect(replayTodos(target)).toEqual([{ content: 'second', status: 'pending' }])
+    // A new turn clears the finished checklist.
+    target.append('turn/start', { turn: 2 })
+    expect(replayTodos(target)).toBeNull()
+  })
+
+  it('folds live events through the same todo projector', async () => {
+    const target = await session()
+    target.append('turn/start', { turn: 1 })
+    target.append('todo/write', { todos: [{ content: 'plan', status: 'pending' }] })
+    let live: TodoList | null = null
+    for (const event of target.snapshotEvents()) live = projectTodos(live, event)
+    expect(live).toEqual([{ content: 'plan', status: 'pending' }])
   })
 })

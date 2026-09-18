@@ -14,15 +14,17 @@
  * @module @dsh-external/dsh-cli-app/ui/App
  */
 
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Box, Static, Text, useInput, useStdout } from 'ink'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { COPY, WORDMARK } from './copy.ts'
 import type { UiMessage, ViewModel } from './model.ts'
 import { COMMAND_HINTS } from './state.ts'
-import { splitTranscript } from './transcript.ts'
+import { collapseFirstLine, splitTranscript } from './transcript.ts'
 import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker } from './overlays.tsx'
 import { MessageRow } from './messages.tsx'
+import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
+import { TaskPanel } from './todos.tsx'
 import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
 import type { ThemeTokens } from './theme.ts'
 import type { UiChrome } from './chrome.ts'
@@ -60,6 +62,22 @@ function useTerminalDims(): { columns: number; rows: number } {
   return { columns, rows }
 }
 
+/** Milliseconds the current turn has run; ticks on the spinner interval while active. */
+function useRunningClock(active: boolean): number {
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const startedAtRef = useRef(0)
+  useEffect(() => {
+    if (!active) {
+      setElapsedMs(0)
+      return
+    }
+    startedAtRef.current = Date.now()
+    const timer = setInterval(() => { setElapsedMs(Date.now() - startedAtRef.current) }, SPINNER_INTERVAL_MS)
+    return () => { clearInterval(timer) }
+  }, [active])
+  return elapsedMs
+}
+
 /** Centered-column width for the opencode welcome page. */
 function columnWidthFor(columns: number): number {
   // Never let the centered panel be wider than the terminal: a minimum wider
@@ -75,12 +93,14 @@ function clampIndex(index: number, length: number): number {
 }
 
 /** Bottom status line for the classic layout. */
-function StatusBar(props: { state: ReturnType<ViewModel['getState']>; theme: ThemeTokens }): React.JSX.Element {
-  const { state, theme } = props
+function StatusBar(props: { state: ReturnType<ViewModel['getState']>; theme: ThemeTokens; elapsedMs: number }): React.JSX.Element {
+  const { state, theme, elapsedMs } = props
   return (
     <Box justifyContent="space-between">
       <Text color={theme.muted} dimColor>
-        {state.running ? <Text color={theme.warn}>{COPY.statusRunning}</Text> : <Text color={theme.ok}>{COPY.statusIdle}</Text>}
+        {state.running
+          ? <Text color={theme.warn}>{spinnerFrame(elapsedMs)} {COPY.statusRunning} · {formatElapsed(elapsedMs)}</Text>
+          : <Text color={theme.ok}>{COPY.statusIdle}</Text>}
         {' · '}{state.modelLabel}{' · '}{state.sessionLabel}
         <ContextRing state={state} theme={theme} />
       </Text>
@@ -127,12 +147,15 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const [choiceIndex, setChoiceIndex] = useState(0)
   // Key of the assistant row whose reasoning is expanded (default collapsed).
   const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null)
+  // Ctrl+T fold for the agent task panel.
+  const [todosCollapsed, setTodosCollapsed] = useState(false)
 
   const pickerOpen = state.pickerOpen
   const choicePicker = state.choicePicker
   const connectWizard = state.connectWizard
   const pendingApproval = state.pendingApproval
   const running = state.running
+  const elapsedMs = useRunningClock(running)
   const { columns, rows } = useTerminalDims()
   const columnWidth = columnWidthFor(columns)
 
@@ -317,6 +340,11 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       vm.quit()
       return
     }
+    // Ctrl+T folds or unfolds the agent task panel.
+    if (key.ctrl && lower === 't' && !key.meta) {
+      setTodosCollapsed(prev => !prev)
+      return
+    }
     if (key.return) {
       const line = input.trimEnd()
       setInput('')
@@ -380,6 +408,21 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     </>
   )
 
+  // The task panel docks above the composer while the checklist has open work;
+  // queued prompts announce themselves the same way.
+  const todos = state.todos
+  const todosVisible = todos !== null
+    && todos.length > 0
+    && todos.some(todo => todo.status !== 'completed')
+    && !todosCollapsed
+  const queuedNote = state.queued.length > 0 && (
+    <Box marginBottom={1}>
+      <Text color={theme.muted} dimColor>
+        {COPY.queuedLabel} {state.queued.length} · {collapseFirstLine(state.queued[state.queued.length - 1] ?? '', 48)}
+      </Text>
+    </Box>
+  )
+
   const classicInput = (
     <Box marginTop={1}>
       <Text color={theme.brand}>❯ </Text>
@@ -405,7 +448,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
             {state.modelLabel} · {COPY.permissionLabel} <Text color={theme.brand}>{state.permissionPreset}</Text>
             <ContextRing state={state} theme={theme} />
           </Text>
-          <Text color={running ? theme.warn : theme.ok}>{running ? COPY.statusRunning : COPY.statusIdle}</Text>
+          <Text color={running ? theme.warn : theme.ok}>
+            {running ? `${spinnerFrame(elapsedMs)} ${COPY.statusRunning} · ${formatElapsed(elapsedMs)}` : COPY.statusIdle}
+          </Text>
         </Box>
       </Box>
       <Box marginTop={1} justifyContent="flex-end">
@@ -443,6 +488,8 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
                 <Text color={theme.brand} bold>{COPY.welcomeTagline}</Text>
               </Box>
               {overlays}
+              {todosVisible && <TaskPanel todos={todos} theme={theme} />}
+              {queuedNote}
               {opencodeComposer}
             </Box>
           </Box>
@@ -453,6 +500,8 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       <Box flexDirection="column" width="100%">
         {transcript}
         {overlays}
+        {todosVisible && <TaskPanel todos={todos} theme={theme} />}
+        {queuedNote}
         {opencodeComposer}
       </Box>
     )
@@ -463,8 +512,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       {transcript}
       {pickerOpen && <SessionPicker items={filteredSessions} selected={safePickerIndex} search={sessionSearch} theme={theme} />}
       {overlays}
+      {todosVisible && <TaskPanel todos={todos} theme={theme} />}
+      {queuedNote}
       {classicInput}
-      <StatusBar state={state} theme={theme} />
+      <StatusBar state={state} theme={theme} elapsedMs={elapsedMs} />
     </Box>
   )
 }
