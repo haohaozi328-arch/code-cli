@@ -113,6 +113,7 @@ persona restate 是固定前缀内容，不会扰动轮次间的 KV-cache 复用
 
 - **工具审批**经 agent scope answerer 与 bus 桥接（`[a]/[r]/[esc]`）；`/perm` 走 permission-presets（沙箱 + 审批），缺该服务时退化为 `ask|never`。审计事件落 log；REAL-composition 覆盖 allow/reject/never。
 - **会话面**：resume 选择器、`/new`、`/fork`、标题、会话标签；列表上限 50 条，按最新在前。
+- **升级后首次打开会话列表**：修复前持久化的会话，其列表元数据靠对未缓存日志的一次只读冷推导（数秒，每进程一次）；每个会话下次打开后即入缓存，此后列表零 I/O。
 - **`/new` 与空会话**：`/new` 只在当前会话已有真实对话时才打开新会话；未触碰的会话按「重置当前视图」处理，因此反复 `/new` 不再堆积会话。例外：从一个已使用的会话切向一个从未输入的会话时，后者在 handle 关闭时仍会落盘（官方 persistence 无删除接口）——每次至多一个。
 - **会话边界清屏**：`/new`、`/sessions`、`/fork`、`/model` 换会话时先清空当前视口再写新会话的静态转录（scrollback 保留）。
 - **markdown 子集**：行内 code/**bold**/*italic*、围栏代码、标题、列表、引用；表格与链接未渲染。

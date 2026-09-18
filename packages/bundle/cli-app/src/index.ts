@@ -31,6 +31,7 @@ import { resolveChrome } from './ui/chrome.ts'
 import { resolveTheme } from './ui/theme.ts'
 import { installResizeReflow } from './ui/resize.ts'
 import { CLEAR_VIEWPORT } from './ui/terminal.ts'
+import { registerSessionListProjection } from './list-projection.ts'
 import { collectForkSeed, listPersistedSessions, sessionLabel } from './sessions.ts'
 import type { ApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 
@@ -361,5 +362,8 @@ async function run(ctx: Context, config: Config): Promise<void> {
 
 /** Mount the terminal glue. */
 export function apply(ctx: Context, config: Config): void {
+  // The terminal profile mounts no session-controller, so the picker's
+  // sessionListMetadata unit is registered here, before any session runs.
+  registerSessionListProjection(ctx)
   void run(ctx, config).catch((error: unknown) => { fail(ctx, error) })
 }

@@ -1,13 +1,14 @@
 ﻿/**
  * Session-surface helpers for the terminal app: persisted-session catalog
  * (id/title/cwd/time/event count), fork-seed collection over a live session
- * log, and display formatting. Pure reads —no session is opened for the
- * catalog; titles come from the persisted projection cache when available.
+ * log, and display formatting. Pure reads: catalog rows come from the
+ * projection cache when available, with one read-only handle per uncached
+ * session as the fallback; titles come from the persisted projection cache.
  * @module @dsh-external/dsh-cli-app/sessions
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionLogOffset, type Session, type SessionEvent, type SessionHeader } from '@deepseek-ai/dsh-session'
+import { SessionLogOffset, type Session, type SessionEvent, type SessionHeader, type SessionId } from '@deepseek-ai/dsh-session'
 // Empty type imports carry the ctx service merges this module reads.
 import type {} from '@deepseek-ai/dsh-session-persistence'
 import type { SessionPersistenceSnapshot } from '@deepseek-ai/dsh-session-persistence'
@@ -51,9 +52,17 @@ export async function listPersistedSessions(ctx: Context): Promise<SessionSummar
   const cache = ctx.get('sessionProjectionCache')
   if (cache === undefined) return []
   const rows: SessionSummary[] = []
-  for (const snapshot of snapshots) {
+  // Resolve every session's listing facts before filtering: cache rows first
+  // (zero I/O), then one bounded cold read for sessions whose checkpoint
+  // predates this bundle's registration of the unit (the backlog), or whose
+  // seeded identity the zero-I/O lookup cannot match.
+  const metadatas = await Promise.all(snapshots.map(async (snapshot) => {
+    const cached = cachedListMetadata(cache, snapshot.header, SessionLogOffset(0))
+    return cached ?? coldListMetadata(persistence, snapshot.header.id)
+  }))
+  for (const [index, snapshot] of snapshots.entries()) {
     const header = snapshot.header
-    const metadata = cachedListMetadata(cache, header)
+    const metadata = metadatas[index]
     // A session is a real conversation only after a user-authored prompt has
     // been committed. This deliberately excludes untouched sessions created by /new.
     if (metadata?.blank !== false) continue
@@ -72,7 +81,11 @@ export async function listPersistedSessions(ctx: Context): Promise<SessionSummar
 }
 
 /** Read the list metadata projection without opening the session. */
-function cachedListMetadata(cache: unknown, header: SessionHeader): { blank: boolean; lastPromptAt: number | null } | undefined {
+function cachedListMetadata(
+  cache: unknown,
+  header: SessionHeader,
+  cut: SessionLogOffset,
+): { blank: boolean; lastPromptAt: number | null } | undefined {
   const service = cache as {
     cachedSnapshot?(
       meta: SessionHeader,
@@ -80,7 +93,7 @@ function cachedListMetadata(cache: unknown, header: SessionHeader): { blank: boo
       keys?: readonly string[],
     ): { values: Record<string, unknown> } | undefined
   }
-  const snapshot = service.cachedSnapshot?.(header, SessionLogOffset(0), ['sessionListMetadata'])
+  const snapshot = service.cachedSnapshot?.(header, cut, ['sessionListMetadata'])
   const value = snapshot?.values['sessionListMetadata']
   if (typeof value !== 'object' || value === null) return undefined
   const record = value as Record<string, unknown>
@@ -88,6 +101,36 @@ function cachedListMetadata(cache: unknown, header: SessionHeader): { blank: boo
   return {
     blank: record.blank,
     lastPromptAt: typeof record.lastPromptAt === 'number' ? record.lastPromptAt : null,
+  }
+}
+
+/**
+ * Derive the listing facts from the stored log itself: the fallback for
+ * sessions whose checkpoint lacks the unit (rows written before this bundle
+ * registered it) or whose seeded identity defeats the zero-I/O lookup. One
+ * read handle; the backend's parsed-log memo makes repeat picker opens cheap.
+ */
+async function coldListMetadata(
+  persistence: {
+    open(id: SessionId, access: 'read'): Promise<{ read(): Promise<readonly SessionEvent[]>; close(): Promise<void> }>
+  },
+  id: SessionId,
+): Promise<{ blank: boolean; lastPromptAt: number | null } | undefined> {
+  try {
+    const handle = await persistence.open(id, 'read')
+    try {
+      let blank = true
+      let lastPromptAt: number | null = null
+      for (const event of await handle.read()) {
+        blank = blank && event.type !== 'turn/start'
+        if (event.type === 'user/message' && event.data.source.kind === 'user') lastPromptAt = event.time
+      }
+      return { blank, lastPromptAt }
+    } finally {
+      await handle.close()
+    }
+  } catch {
+    return undefined
   }
 }
 

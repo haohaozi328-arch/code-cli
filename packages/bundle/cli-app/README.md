@@ -113,6 +113,7 @@ Current constraints, registered honestly rather than silently:
 
 - **Tool approvals** are bridged through the agent-scope answerer and the bus (`[a]/[r]/[esc]`); `/perm` goes through permission-presets (sandbox + approval) and degrades to `ask|never` when that service is absent. Audit events land in the log; REAL-composition covers allow/reject/never.
 - **Session surface**: resume picker, `/new`, `/fork`, titles, session label; the list is capped at 50 entries, newest first.
+- **First picker open after an upgrade**: list metadata for sessions persisted before the picker fix is derived by one read-only pass over the uncached logs (seconds, once per process); each session's next open caches the facts for zero-I/O listings afterwards.
 - **`/new` and empty sessions**: `/new` opens a new session only when the current one has real conversation; an untouched session is treated as "reset the current view", so repeated `/new` no longer accumulates sessions. Exception: leaving a used session for one that never receives input still persists that empty session at handle close (official persistence has no delete API) — at most one at a time.
 - **Session-boundary clear**: `/new`, `/sessions`, `/fork`, `/model` clear the current viewport before writing the new session's static transcript (scrollback stays).
 - **Markdown subset**: inline code/**bold**/*italic*, fenced code, headings, lists, quotes; tables and links are not rendered.

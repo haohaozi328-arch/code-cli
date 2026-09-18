@@ -11,6 +11,7 @@ import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent, AgentHandle, CreateAgentOptions, ResumeAgentOptions } from '@deepseek-ai/dsh-agent'
 import AgentDefaultModelConfig from '@deepseek-ai/dsh-agent-default-model'
 import SessionStore from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import type { UserMessage } from '@deepseek-ai/dsh-session'
 import { apply, Config, internals } from '../src/index.ts'
 import type { ViewModel } from '../src/ui/model.ts'
@@ -92,6 +93,8 @@ async function bench(
   const order: string[] = []
   const calls: FactoryCalls = { create: [], resume: [] }
   await ctx.plugin(SessionStore)
+  // The glue registers the picker's sessionListMetadata unit at apply time.
+  await ctx.plugin(SessionProjectionRegistry)
   await ctx.plugin(AgentRegistry)
   await ctx.plugin(AgentDefaultModelConfig, { provider: 'deepseek-official', model: 'deepseek-v4-flash' })
   const echo = () => {}
