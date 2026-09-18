@@ -104,7 +104,7 @@ export const internals: { render: (element: React.ReactElement) => InkSurface } 
 export const testHooks: { currentVm: ViewModel | null } = { currentVm: null }
 
 /** Core services required before the terminal session can start. */
-export const inject = ['cliStartup', 'agentDefaultModel', 'agents', 'sessions']
+export const inject = ['cliStartup', 'agentDefaultModel', 'agents', 'sessions', 'sessionProjections']
 
 /** Plugin config: invocation values resolved from the startup provider. */
 export interface Config {
