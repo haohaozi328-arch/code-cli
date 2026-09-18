@@ -186,6 +186,10 @@ opencode 对齐新增：
 - **running 排队**：`send()` 运行中不再报错，改为 FIFO 队列，idle 边沿逐条 drain（`submitPrompt` 提取共用）；`stop()`（Ctrl+C）同时清队列。两个旧「still running」用例按新语义改写（行为变更随测试更新）。
 - 键位/帮助/README 同步；106 用例全绿，oxlint 0，tsc 0。
 
+## dsh-taskboard 任务进程时间看板（2026-09-18）
+
+用户要求在 todo 面板之外补一个独立的**任务进程时间看板**：`Ctrl+Alt` 在主界面与看板之间整屏切换（看板打开时吞掉其余按键）。看板只读 ViewModel 已投影的状态，与转录永不打架：任务清单（`todo/write` 投影，`[✓]/[•]/[ ]` 全量展示 + 完成计数）、当前回合（运行中给 spinner+实时用时+排队深度；空闲给上回合时长与结束时钟）、逐回合时间线（`turn/start`/`turn/end` 折叠出的挂钟时段，`#回合 HH:MM → HH:MM 时长`，新到旧，上限 12 条环形丢弃）、模型/权限/上下文环/用量读数，以及待审批警示（看板不会藏住一个等待确认的工具门）。实现：`ui/taskboard.tsx` 持有 `reduceTurnSpans/collectTurnSpans`（纯折叠，引用稳定）与 `isBoardToggle`（Ctrl+Alt 判定，Ink 的 ctrl+meta 键标志）；VM 增 `boardOpen/turnSpans` 状态与 `toggleBoard` 动作（replay 时从 durable log 一次折叠历史回合，live 路径吃 `session/event`）；App 顶层先处理切换再放行其余键位。`/help` 增补键位行。约定：测试不直接 import `.tsx`（宿主聚合工程的 TS6305 陷阱），一律走 `ui/index.ts` barrel。门禁：vitest 120/120（新增 9 例）、oxlint 0、tsc 0、typecheck 全仓绿、双 profile 启动冒烟通过。
+
 ## 工作副本 merge 提示
 
 merge upstream 时需手动保留：root `package.json` 的 devDeps、`tsconfig.base.json` 手写 alias 区、`tsconfig.host.json` 的 cli-app reference、`packages/bundle/cli-app/tsconfig.json` 里为 permission-presets / credentials / settings / brand / values / token-meter 补的项目引用，以及 `scripts/verify-package-readme-model-experience.ts` 中 cli-app 的间接条目。`packages/bundle/cli-app/` 与 `docs/cli-app/` 为新增未跟踪目录。

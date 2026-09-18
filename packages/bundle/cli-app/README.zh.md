@@ -48,6 +48,7 @@ dsh --profile cli --ui opencode         # switch the layout for one run
 - 带计量的状态行：`token 42.5/s` 吞吐、累计用量，以及压缩落地即时降档的上下文占用环。
 - agent 运行时的盲文 spinner 与已用时间；运行中输入的普通提示按 FIFO 排队，空闲沿逐条发送（斜杠命令不受限）。
 - 一套交互内核上的两种布局：`classic`（单列、`❯` 提示、底部状态行）与 opencode 式（空会话居中欢迎页，对话后全宽）。
+- 全屏任务看板（`dsh-taskboard`）：`Ctrl+Alt` 把对话切换为看板——任务清单、逐回合时间线（挂钟时段）、运行中的实时用时、排队深度与用量/上下文读数；同一组合键切回。
 
 -----
 

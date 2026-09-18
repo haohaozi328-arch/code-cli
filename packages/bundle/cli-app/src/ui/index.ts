@@ -6,3 +6,4 @@
  */
 
 export { App } from './App.tsx'
+export { TaskBoard, collectTurnSpans, formatClock, isBoardToggle, reduceTurnSpans, TURN_SPAN_LIMIT } from './taskboard.tsx'

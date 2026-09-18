@@ -38,6 +38,7 @@ import type {
 import { renderError } from './render-error.ts'
 import { contextOccupancy, estimateLiveTokens, tokensPerSecond } from './status.ts'
 import { blocksToText, countDurableTokens, hasConversation, projectEvent, projectTodos, replaySession, replayTodos } from './transcript.ts'
+import { collectTurnSpans, reduceTurnSpans } from './taskboard.tsx'
 
 /** The most recent approval policy recorded in the log, or the default. */
 function lastApprovalPolicy(session: Session): 'ask' | 'never' {
@@ -118,6 +119,10 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let todos: TodoList | null = replayTodos(session)
   // Prompts typed while the agent runs; the idle edge drains them FIFO.
   let queued: readonly string[] = []
+  // Board data: recent per-turn wall-clock spans folded from the durable log,
+  // and the Ctrl+Alt board toggle the renderer flips.
+  let turnSpans = collectTurnSpans(session.snapshotEvents())
+  let boardOpen = false
   const tokens = countDurableTokens(session)
   const pickerItems = catalog
   const meter = ctx.get('tokenMeter')
@@ -518,6 +523,12 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     // return below.
     refreshOccupancy()
     todos = projectTodos(todos, event)
+    const nextSpans = reduceTurnSpans(turnSpans, event)
+    if (nextSpans !== turnSpans) {
+      turnSpans = nextSpans
+      snapshot = null
+      notify()
+    }
     // A committed assistant row settles through the assistant-stream end frame,
     // which maps the attempt identity onto its durable seq; folding the raw
     // assistant/message event here too would paint the same row twice.
@@ -579,6 +590,8 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           contextOccupancy: context,
           todos,
           queued: [...queued],
+          boardOpen,
+          turnSpans,
           choicePicker,
           connectWizard: connect.state,
           transcriptEpoch,
@@ -609,6 +622,11 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       setQueued([])
       if (!running) return
       agent.cancel({ kind: 'user' })
+    },
+    toggleBoard() {
+      boardOpen = !boardOpen
+      snapshot = null
+      notify()
     },
     quit() {
       requestQuit()

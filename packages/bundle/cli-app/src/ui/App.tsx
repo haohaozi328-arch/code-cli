@@ -25,6 +25,7 @@ import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker } 
 import { MessageRow } from './messages.tsx'
 import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
 import { TaskPanel } from './todos.tsx'
+import { TaskBoard, isBoardToggle } from './taskboard.tsx'
 import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
 import type { ThemeTokens } from './theme.ts'
 import type { UiChrome } from './chrome.ts'
@@ -199,6 +200,13 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   useInput((chunk, key) => {
     const lower = chunk.toLowerCase()
+    // Ctrl+Alt swaps the conversation for the full-screen task board; the
+    // same chord returns. While the board is up it swallows every other key.
+    if (isBoardToggle(key)) {
+      vm.toggleBoard()
+      return
+    }
+    if (state.boardOpen) return
     // Priority 1: tool approval question.
     if (pendingApproval !== null) {
       if (lower === 'a') vm.resolveApproval('allowed-once')
@@ -458,6 +466,12 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       </Box>
     </>
   )
+
+  // The board replaces the whole chrome: one full-screen monitoring surface
+  // over the same view-model state the transcript renders from.
+  if (state.boardOpen) {
+    return <TaskBoard state={state} theme={theme} elapsedMs={elapsedMs} />
+  }
 
   if (chrome === 'opencode') {
     // /sessions focuses the picker over the code surface.

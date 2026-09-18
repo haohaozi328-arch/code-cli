@@ -95,6 +95,16 @@ export interface ContextOccupancy {
   contextWindow: number
 }
 
+/** One observed agent turn with its wall-clock span (durable event times). */
+export interface TurnSpan {
+  /** The turn counter carried by `turn/start`. */
+  turn: number
+  /** Epoch milliseconds when the turn started. */
+  startedAt: number
+  /** Epoch milliseconds when the turn settled, or null while open. */
+  endedAt: number | null
+}
+
 /** Whole-screen snapshot handed to React through useSyncExternalStore. */
 export interface UiState {
   messages: UiMessage[]
@@ -121,6 +131,10 @@ export interface UiState {
   todos: TodoList | null
   /** Prompts typed while the agent ran; drained FIFO when the turn settles. */
   queued: readonly string[]
+  /** Whether the full-screen task board has replaced the conversation view. */
+  boardOpen: boolean
+  /** Recent per-turn wall-clock spans folded from the durable log, oldest first. */
+  turnSpans: readonly TurnSpan[]
   /** An open model/policy/connect choice list, or null. */
   choicePicker: ChoicePickerState | null
   /** Current `/connect` wizard, excluding the secret API key. */
@@ -178,6 +192,8 @@ export interface ViewModel {
   send: (text: string) => void
   /** Cancel the running turn (user cause). */
   stop: () => void
+  /** Swap the conversation for the full-screen task board (and back). */
+  toggleBoard: () => void
   /** Leave the app entirely. */
   quit: () => void
   /** Open the session picker. */
