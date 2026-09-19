@@ -123,7 +123,7 @@ Current constraints, registered honestly rather than silently:
 - **tool-call argument streaming preview**: transient preview on the streaming row; the landed card takes over.
 - **Untruncated transcript**: `state.messages` matches the durable log in length (one light object per row); settled static rows leave the React tree once written. `/clear` clears the current viewport and rebuilds the static list; terminal scrollback is kept.
 - **Tokens**: usage is re-accumulated from the durable log on resume; the first half of a streaming throughput reading is a character-density estimate, replaced when the provider usage arrives.
-- **Registry slash commands**: `/compact /feedback /goal /plan` execute through `ctx.commands` and print as ordinary visible rows; unregistered `/xxx` prints an unknown hint instead of being sent to the model.
+- **Registry slash commands**: `/compact /goal /plan` execute through `ctx.commands` and print as ordinary visible rows; unregistered `/xxx` prints an unknown hint instead of being sent to the model.
 - **Input**: single-line input (backspace works); arrow-key editing and multi-line paste are not implemented.
 - **Window resize**: the shrink direction is corrected; the widen direction depends on the terminal's fold-merge behavior (xterm/Windows Terminal merge) and is not corrected. Bare writes outside the live region (a plugin writing stdout directly) may be mistaken for a frame; only the erase count is affected, never content.
 - **`auto` theme** always lands dark; luminance probing is not implemented.

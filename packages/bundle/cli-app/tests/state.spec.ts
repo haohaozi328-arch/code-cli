@@ -690,6 +690,13 @@ describe('createViewModel title and history', () => {
     expect(vm.getState().sessionLabel).toBe(before)
   })
 
+  it('/feedback is inert in this fork and answers with the unknown-command hint', async () => {
+    const { vm } = await bench()
+    vm.send('/feedback 很好用')
+    expect(vm.getState().error).toContain('unknown command: /feedback')
+    expect(vm.getState().messages.at(-1)?.text ?? '').not.toContain('很好用')
+  })
+
   it('the arrow keys walk back through the prompts sent this process', async () => {
     const { vm } = await bench()
     vm.send('第一问')

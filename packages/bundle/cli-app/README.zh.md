@@ -123,7 +123,7 @@ persona restate 是固定前缀内容，不会扰动轮次间的 KV-cache 复用
 - **tool-call 参数流式预览**：流式行上的过渡预览；落地卡片接管。
 - **转录不截断**：`state.messages` 与 durable log 等长（每行一个轻量对象）；已定稿的静态行写入后即离开 React 树。`/clear` 只清当前视口并重建静态列表；终端 scrollback 保留。
 - **tokens**：resume 时从 durable log 补计用量；流式吞吐读数的前半段是字符密度估算，provider usage 到达后替换。
-- **注册表斜杠命令**：`/compact /feedback /goal /plan` 经 `ctx.commands` 执行，输出作为普通可见行；未注册的 `/xxx` 提示 unknown，不发给模型。
+- **注册表斜杠命令**：`/compact /goal /plan` 经 `ctx.commands` 执行，输出作为普通可见行；未注册的 `/xxx` 提示 unknown，不发给模型。
 - **输入**：单行输入（退格可用）；方向键编辑/多行粘贴未实现。
 - **窗口缩放**：缩窄方向已校正；变宽方向依赖终端的折行合并行为（xterm/Windows Terminal 会合并），未做校正。活动区外的裸写（插件直接写 stdout）可能被误当作帧；只影响擦除数，不影响内容。
 - **`auto` 主题**固定落深色；亮度探测未做。

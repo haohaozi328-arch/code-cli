@@ -129,7 +129,7 @@ export const HELP_TEXT: string = [
   '  /perm             设置权限预设（沙箱 + 审批）',
   '  /connect          连接模型商（主流 + 自定义）',
   '  /title            重命名当前会话',
-  '  /compact /feedback /goal /plan   上下文、反馈、目标与计划命令',
+  '  /compact /goal /plan             上下文、目标与计划命令',
   '  /quit, /exit      退出会话（也可使用 Ctrl+D）',
   '  Ctrl+T            折叠或展开任务面板',
   '  Ctrl+B            切换任务进程时间看板（dsh-taskboard）',

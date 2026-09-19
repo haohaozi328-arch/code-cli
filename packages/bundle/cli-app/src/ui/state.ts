@@ -475,6 +475,11 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         }
         return
       }
+      case '/feedback':
+        // Removed from this fork's terminal surface: the bundle still mounts
+        // the plugin, but the command is inert here and stays out of /help.
+        setError(`unknown command: ${name}; try /help`)
+        return
       default:
         dispatchRegistryCommand(name, line)
     }
@@ -796,7 +801,6 @@ export const COMMAND_HINTS: readonly CommandHint[] = [
   { name: '/perm', hint: 'Permission preset', arg: 'workspace-write|danger-full-access' },
   { name: '/connect', hint: 'Connect a model provider' },
   { name: '/title', hint: 'Rename this session', arg: 'text' },
-  { name: '/feedback', hint: 'Record session feedback' },
   { name: '/goal', hint: 'Manage the session goal' },
   { name: '/plan', hint: 'Enter plan mode' },
   { name: '/clear', hint: 'Clear the current display' },
