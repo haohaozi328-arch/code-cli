@@ -285,6 +285,8 @@ function viewModel(state: UiState): ViewModel {
     subscribe: () => noop,
     getState: () => state,
     send: noop,
+    historyOlder: () => null,
+    historyNewer: () => null,
     stop: noop,
     toggleBoard: noop,
     quit: noop,

@@ -13,7 +13,7 @@ import { render } from 'ink-testing-library'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createAssistantMessage } from '@deepseek-ai/dsh-llm'
 import { COPY } from '../src/ui/copy.ts'
-import type { TurnEntry, UiState } from '../src/ui/model.ts'
+import type { TurnEntry, TurnMessage, UiState } from '../src/ui/model.ts'
 import type { ThemeTokens } from '../src/ui/theme.ts'
 import { resolveTheme } from '../src/ui/theme.ts'
 import {
@@ -22,6 +22,7 @@ import {
   collectTurnEntries,
   formatClock,
   isBoardToggle,
+  packPanePages,
   reduceTurnEntries,
   stepTimelineCursor,
 } from '../src/ui/index.ts'
@@ -183,6 +184,52 @@ describe('isBoardToggle', () => {
     expect(isBoardToggle('b', { ctrl: true, meta: true })).toBe(false)
     expect(isBoardToggle('b', { ctrl: false, meta: false })).toBe(false)
     expect(isBoardToggle('t', { ctrl: true, meta: false })).toBe(false)
+  })
+})
+
+describe('packPanePages', () => {
+  it('packs the conversation into pane-sized pages, newest first', () => {
+    const message = (time: number, lines: number): TurnMessage => ({
+      role: 'assistant', time, text: Array.from({ length: lines }, (_, i) => `行${i}`).join('\n'),
+    })
+    const messages = [message(1, 1), message(2, 1), message(3, 1), message(4, 1), message(5, 1), message(6, 1)]
+    // One one-line assistant message costs 3 rows; a budget of 7 fits two plus the gap.
+    expect(packPanePages(messages, 7).map(page => [page.start, page.end])).toEqual([[4, 6], [2, 4], [0, 2]])
+    // A message taller than the whole budget still gets its own page.
+    expect(packPanePages([message(1, 30), message(2, 1)], 2).map(page => [page.start, page.end])).toEqual([[1, 2], [0, 1]])
+    expect(packPanePages([], 10)).toEqual([])
+  })
+
+  it('pages the content pane back through the turn with the arrow keys', () => {
+    const longLine = '字'.repeat(200)
+    const paged: TurnEntry[] = [{
+      turn: 1,
+      startedAt: Date.now() - 60_000,
+      endedAt: Date.now(),
+      prompt: '翻页回合',
+      reply: longLine,
+      tools: [],
+      outputTokens: 0,
+      messages: Array.from({ length: 12 }, (_, index) => ({
+        role: 'assistant' as const,
+        time: index,
+        text: `序号 ${index} 的消息\n${longLine}`,
+      })),
+    }]
+    const rich = boardState({ turnTimeline: paged })
+    const tail = render(
+      React.createElement(TaskBoard, { state: rich, theme, elapsedMs: 0, cursor: -1, rows: 40, columns: 60 }),
+    ).frames.at(-1) ?? ''
+    expect(tail).toContain('序号 11 的消息')
+    expect(tail).toContain(COPY.boardMoreMessages)
+    expect(tail).toContain('1/')
+    expect(tail).toContain(COPY.boardPageHint)
+    const older = render(
+      React.createElement(TaskBoard, { state: rich, theme, elapsedMs: 0, cursor: -1, panePage: 1, rows: 40, columns: 60 }),
+    ).frames.at(-1) ?? ''
+    expect(older).not.toContain('序号 11 的消息')
+    expect(older).toContain(COPY.boardMoreLater)
+    expect(older).toContain('2/')
   })
 })
 

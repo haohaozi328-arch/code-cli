@@ -59,7 +59,7 @@ export const COPY = {
   queuedLabel: '已排队',
 
   boardTitle: 'dsh-taskboard',
-  boardHint: 'Ctrl+B 返回对话 · ↑↓/PgUp PgDn 拖动时间轴 · /help 全部键位',
+  boardHint: 'Ctrl+B 返回对话 · ↑↓/PgUp PgDn 切回合 · ←→ 翻页 · /help 全部键位',
   boardTurnNow: '当前回合',
   boardLastTurn: '上回合',
   boardTimeline: '回合时间线',
@@ -69,6 +69,8 @@ export const COPY = {
   boardLiveSuffix: '进行中',
   boardMoreLines: '…还有',
   boardMoreMessages: '…更早还有',
+  boardMoreLater: '…更晚还有',
+  boardPageHint: '←→ 翻页',
   boardNoMessages: '该回合暂无对话内容',
   axisEmpty: '（空回合）',
   boardNavHint: '↑↓ 选择回合 · Home 回到最新 · End 最早 · Esc 返回对话',
@@ -76,6 +78,9 @@ export const COPY = {
   boardEmptySpans: '暂无回合记录 · 发送第一条消息后开始记录',
   boardNoTodos: '本会话暂无任务清单（agent 调 todo/write 后显示）',
   boardApprovalPending: '有工具审批待处理 — 返回对话确认',
+  titleUsage: '/title <text> — 重命名当前会话',
+  titleUnavailable: '标题服务未挂载，无法重命名',
+  titleFailedPrefix: '/title 失败：',
 
   welcomeTagline: '终端助手',
 
@@ -121,6 +126,7 @@ export const HELP_TEXT: string = [
   '  /model            切换模型（provider/model）',
   '  /perm             设置权限预设（沙箱 + 审批）',
   '  /connect          连接模型商（主流 + 自定义）',
+  '  /title            重命名当前会话',
   '  /compact /feedback /goal /plan   上下文、反馈、目标与计划命令',
   '  /quit, /exit      退出会话（也可使用 Ctrl+D）',
   '  Ctrl+T            折叠或展开任务面板',

@@ -82,6 +82,42 @@ export function stepTimelineCursor(
   return index
 }
 
+/** One content-pane page: the half-open message index range it shows. */
+export interface PanePage {
+  start: number
+  end: number
+}
+
+/**
+ * Pack one turn's conversation into pane-sized pages, newest page first. Each
+ * page costs at most `budget` rendered rows; a message taller than the budget
+ * still gets a page of its own so packing always makes progress.
+ */
+export function packPanePages(messages: readonly TurnMessage[], budget: number): readonly PanePage[] {
+  const pages: PanePage[] = []
+  let end = messages.length
+  while (end > 0) {
+    let used = 0
+    let start = end
+    while (start > 0) {
+      const message = messages[start - 1]
+      if (message === undefined) break
+      const lines = message.role === 'tool' ? 0 : message.text.split('\n').length
+      const cost = message.role === 'tool'
+        ? 1
+        : 2 + Math.min(MESSAGE_LINE_LIMIT, lines) + (lines > MESSAGE_LINE_LIMIT ? 1 : 0)
+      const gap = start === end ? 0 : 1
+      if (used + cost + gap > budget) break
+      used += cost + gap
+      start -= 1
+    }
+    if (start === end) start = end - 1
+    pages.push({ start, end })
+    end = start
+  }
+  return pages
+}
+
 /** Appends one conversation message, keeping only the most recent TURN_MESSAGE_LIMIT of them. */
 function appendMessage(messages: readonly TurnMessage[], message: TurnMessage): TurnMessage[] {
   const next = [...messages, message]
@@ -269,8 +305,11 @@ export function TaskBoard(props: {
   rows: number
   /** Terminal width in columns; pane lines truncate to stay one row each. */
   columns: number
+  /** Page index into the turn's conversation pages; 0 shows the newest. */
+  panePage?: number
 }): React.JSX.Element {
   const { state, theme, elapsedMs, cursor, rows, columns } = props
+  const page = props.panePage ?? 0
   const todos = state.todos
   const done = todos?.filter(todo => todo.status === 'completed').length ?? 0
   const length = state.turnTimeline.length
@@ -290,23 +329,18 @@ export function TaskBoard(props: {
   const shownAxisCount = paneVisible ? axisRows : Math.min(TURN_TIMELINE_LIMIT, Math.max(1, available))
   let paneMessages: readonly TurnMessage[] = []
   let paneDropped = 0
+  let paneLater = 0
+  let panePageCount = 1
   if (paneVisible && entry.messages.length > 0) {
-    let used = 0
-    let start = entry.messages.length
-    while (start > 0) {
-      const message = entry.messages[start - 1]
-      if (message === undefined) break
-      const lines = message.role === 'tool' ? 0 : message.text.split('\n').length
-      const cost = message.role === 'tool'
-        ? 1
-        : 2 + Math.min(MESSAGE_LINE_LIMIT, lines) + (lines > MESSAGE_LINE_LIMIT ? 1 : 0)
-      const gap = start === entry.messages.length ? 0 : 1
-      if (used + cost + gap > paneBudget) break
-      used += cost + gap
-      start -= 1
+    const pages = packPanePages(entry.messages, paneBudget)
+    const index = Math.min(Math.max(0, page), pages.length - 1)
+    const window = pages[index]
+    if (window !== undefined) {
+      paneMessages = entry.messages.slice(window.start, window.end)
+      paneDropped = window.start
+      paneLater = entry.messages.length - window.end
+      panePageCount = pages.length
     }
-    paneMessages = entry.messages.slice(start)
-    paneDropped = start
   }
 
   return (
@@ -366,6 +400,9 @@ export function TaskBoard(props: {
             {entry.endedAt === null && state.running && (
               <Text color={theme.warn}> · {COPY.boardLiveSuffix}</Text>
             )}
+            {panePageCount > 1 && (
+              <Text color={theme.muted} dimColor> · {page + 1}/{panePageCount} {COPY.boardPageHint}</Text>
+            )}
           </Text>
           {entry.messages.length === 0
             ? <Text color={theme.muted} dimColor>{COPY.boardNoMessages}</Text>
@@ -392,6 +429,9 @@ export function TaskBoard(props: {
                     </Box>
                   )
                 })}
+                {paneLater > 0 && (
+                  <Text color={theme.muted} dimColor>{COPY.boardMoreLater} {paneLater}</Text>
+                )}
               </>
             )}
         </Box>

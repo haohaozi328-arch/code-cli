@@ -24,6 +24,7 @@ import { assertNever } from '@deepseek-ai/dsh-util-values'
 // and the cmdline Context merge for the appExit host value.
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import type {} from '@deepseek-ai/dsh-cmdline'
+import { createPromptHistory } from './ui/history.ts'
 import { createApprovalBus, createViewModel } from './ui/state.ts'
 import type { ApprovalBus, ViewModel } from './ui/model.ts'
 import { App } from './ui/index.ts'
@@ -282,6 +283,8 @@ async function run(ctx: Context, config: Config): Promise<void> {
   const flush = async (session: Session): Promise<void> => { await sessions.flush(session) }
 
   // The session lifecycle loop: each vm.done carries what the user asked next.
+  // One prompt-history store serves every session this process runs.
+  const promptHistory = createPromptHistory()
   let request: SessionRequest = config.resumeSessionId !== ''
     ? { kind: 'resume', sessionId: config.resumeSessionId }
     : { kind: 'fresh' }
@@ -302,6 +305,7 @@ async function run(ctx: Context, config: Config): Promise<void> {
         catalog,
         approvalBus,
         flush,
+        promptHistory,
         requestScreenClear: () => { ink?.clearViewport?.() },
       })
       live = { handle, vm }

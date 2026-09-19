@@ -153,6 +153,8 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   // The board's timeline cursor: -1 follows the live turn; the arrow keys drag
   // it through history while the board's content pane renders that turn.
   const [boardCursor, setBoardCursor] = useState(-1)
+  // The content pane's page inside the selected turn; 0 shows the newest page.
+  const [panePage, setPanePage] = useState(0)
 
   const pickerOpen = state.pickerOpen
   const choicePicker = state.choicePicker
@@ -198,8 +200,15 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   }, [choicePicker])
   // Opening the board always lands on the live turn.
   useEffect(() => {
-    if (state.boardOpen) setBoardCursor(-1)
+    if (state.boardOpen) {
+      setBoardCursor(-1)
+      setPanePage(0)
+    }
   }, [state.boardOpen])
+  // Dragging to another turn also lands on its newest page.
+  useEffect(() => {
+    setPanePage(0)
+  }, [boardCursor])
   // The command menu follows the buffer; reset the highlight on every edit.
   useEffect(() => {
     setCommandIndex(0)
@@ -227,6 +236,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
           if (next >= length - 1) return -1
           return Math.max(0, next)
         })
+        return
+      }
+      if (key.leftArrow || key.rightArrow) {
+        setPanePage(prev => (key.leftArrow ? Math.min(prev + 1, 999) : Math.max(0, prev - 1)))
         return
       }
       return
@@ -397,7 +410,14 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       setInput(prev => prev.slice(0, -1))
       return
     }
-    if (key.escape || key.tab || key.upArrow || key.downArrow || key.leftArrow || key.rightArrow) return
+    // Prompt history: ↑/↓ walk back through the prompts this process has sent;
+    // stepping past the newest restores the draft that was being typed.
+    if (key.upArrow || key.downArrow) {
+      const recalled = key.upArrow ? vm.historyOlder(input) : vm.historyNewer(input)
+      if (recalled !== null) setInput(recalled)
+      return
+    }
+    if (key.escape || key.tab || key.leftArrow || key.rightArrow) return
     // Anything else printable lands in the buffer, including IME-composed text
     // and shifted symbols. Ctrl/meta chords were handled above.
     if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
@@ -506,6 +526,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
           theme={theme}
           elapsedMs={elapsedMs}
           cursor={boardCursor}
+          panePage={panePage}
           rows={rows}
           columns={columns}
         />

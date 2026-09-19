@@ -10,6 +10,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import type { Session, SessionId } from '@deepseek-ai/dsh-session'
 import type { SessionSummary } from '../sessions.ts'
+import type { PromptHistory } from './history.ts'
 // Type-only: carries the `todo/write` SessionEventMap merge and the TodoItem type.
 import type { TodoItem } from '@deepseek-ai/dsh-tool-todo'
 
@@ -200,6 +201,8 @@ export interface ViewModelOptions {
   approvalBus: ApprovalBus
   /** Optional flusher called after each settled turn (headless-style durability). */
   flush?: (session: Session) => Promise<void>
+  /** Shared in-process prompt history; the host owns one across sessions. */
+  promptHistory?: PromptHistory
   /** Clear the visible viewport for `/clear`; owned by the Ink glue. */
   requestScreenClear?: () => void
 }
@@ -212,6 +215,10 @@ export interface ViewModel {
   getState: () => UiState
   /** Queue a user turn and wake the driver; registry-command dispatch settles asynchronously. */
   send: (text: string) => void
+  /** Step the composer back through sent prompts; null when nothing is older. */
+  historyOlder: (current: string) => string | null
+  /** Step forward again; the preserved draft returns when stepping past the newest. */
+  historyNewer: (current: string) => string | null
   /** Cancel the running turn (user cause). */
   stop: () => void
   /** Swap the conversation for the full-screen task board (and back). */

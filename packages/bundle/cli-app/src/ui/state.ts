@@ -21,6 +21,11 @@ import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { ConnectController } from './connect.ts'
 import { COPY, HELP_TEXT } from './copy.ts'
+import { createPromptHistory } from './history.ts'
+// Type-only: carries the `session/title` SessionEventMap merge and the ctx `sessionTitle` service.
+import type {} from '@deepseek-ai/dsh-session-title'
+import type { SessionTitleService } from '@deepseek-ai/dsh-session-title'
+import { sessionLabel as formatSessionLabel } from '../sessions.ts'
 import type {
   ApprovalBus,
   ApprovalPrompt,
@@ -125,6 +130,24 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let boardOpen = false
   const tokens = countDurableTokens(session)
   const pickerItems = catalog
+  // Prompt history: one shared store seeds itself from this session's durable
+  // prompts, so a resumed session recalls what it already carried.
+  const history = options.promptHistory ?? createPromptHistory()
+  for (const message of [...messages].reverse()) {
+    if (message.role === 'user' && !message.system) history.remember(message.text)
+  }
+  // The status-bar label tracks the durable title: a user rename or a title
+  // provider event re-derives it from the same seam the picker lists with.
+  let currentTitle: string | null = null
+  let labelValue = sessionLabel
+  const applyTitle = (title: string): void => {
+    if (title === currentTitle) return
+    currentTitle = title
+    const next = formatSessionLabel({ title, sessionId: session.id, cwd: session.header.cwd ?? null })
+    if (next === labelValue) return
+    labelValue = next
+    notify()
+  }
   const meter = ctx.get('tokenMeter')
   // Throughput of the newest observed window. A provider usage sample replaces
   // the live character estimate; both are reported over the attempt's own
@@ -421,6 +444,23 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       case '/clear':
         resetTranscriptView()
         return
+      case '/title': {
+        if (rest === '') {
+          appendNotice(COPY.titleUsage)
+          return
+        }
+        const titleService: SessionTitleService | undefined = ctx.get('sessionTitle')
+        if (titleService === undefined) {
+          appendNotice(COPY.titleUnavailable)
+          return
+        }
+        try {
+          applyTitle(titleService.rename(session, rest).title)
+        } catch (failure) {
+          appendNotice(`${COPY.titleFailedPrefix}${failure instanceof Error ? failure.message : String(failure)}`)
+        }
+        return
+      }
       default:
         dispatchRegistryCommand(name, line)
     }
@@ -522,6 +562,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     // shadow price, a new route capacity), so it is re-read before any early
     // return below.
     refreshOccupancy()
+    if (event.type === 'session/title') applyTitle(event.data.title)
     todos = projectTodos(todos, event)
     const nextEntries = reduceTurnEntries(turnTimeline, event)
     if (nextEntries !== turnTimeline) {
@@ -581,7 +622,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           modelLabel: modelLabelOf(agent.options.model ?? '?'),
           permissionPreset,
           sessionId: agent.id,
-          sessionLabel,
+          sessionLabel: labelValue,
           pickerOpen,
           pickerItems,
           pendingApproval,
@@ -602,6 +643,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     send(text) {
       const trimmed = text.trim()
       if (trimmed === '') return
+      history.reset()
       // Slash commands the UI understands never wait on the agent: lifecycle
       // and navigation must work while a turn is running, and parsing tolerates
       // leading whitespace and case. Plain text is gated by the running check.
@@ -612,10 +654,18 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       if (running) {
         // opencode-style queue: a prompt typed while the agent runs drains
         // FIFO when the current turn settles, instead of bouncing an error.
+        history.remember(trimmed)
         setQueued([...queued, trimmed])
         return
       }
+      history.remember(trimmed)
       submitPrompt(text)
+    },
+    historyOlder(current) {
+      return history.step(1, current)
+    },
+    historyNewer(current) {
+      return history.step(-1, current)
     },
     stop() {
       // Ctrl+C stops everything: the running turn AND anything still queued.
@@ -701,6 +751,7 @@ export const COMMAND_HINTS: readonly CommandHint[] = [
   { name: '/model', hint: 'Switch model', arg: 'provider/model' },
   { name: '/perm', hint: 'Permission preset', arg: 'workspace-write|danger-full-access' },
   { name: '/connect', hint: 'Connect a model provider' },
+  { name: '/title', hint: 'Rename this session', arg: 'text' },
   { name: '/feedback', hint: 'Record session feedback' },
   { name: '/goal', hint: 'Manage the session goal' },
   { name: '/plan', hint: 'Enter plan mode' },

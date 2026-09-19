@@ -626,6 +626,52 @@ describe('createViewModel tools', () => {
   })
 })
 
+describe('createViewModel title and history', () => {
+  it('/title renames through the session-title service and refreshes the label', async () => {
+    const { ctx, agent, vm } = await bench()
+    const session = agent.session
+    ctx.provide('sessionTitle', {
+      rename(target: Session, title: string) {
+        target.append('session/title', { title, messageSeqs: [], source: { kind: 'user' } })
+        return { title, messageSeqs: [], source: { kind: 'user' }, seq: 0, time: 0 }
+      },
+    } as never)
+    vm.send('/title 罗小黑看板')
+    expect(vm.getState().messages.at(-1)?.text).toBeUndefined()
+    expect(vm.getState().sessionLabel).toContain('罗小黑看板')
+    expect(session.snapshotEvents().some(event => event.type === 'session/title')).toBe(true)
+  })
+
+  it('a durable session/title event refreshes the label without the service', async () => {
+    const { agent, vm } = await bench()
+    const session = agent.session
+    session.append('session/title', { title: '投影标题', messageSeqs: [], source: { kind: 'fallback' } })
+    expect(vm.getState().sessionLabel).toContain('投影标题')
+  })
+
+  it('/title without the service explains itself, and bare /title shows usage', async () => {
+    const { vm } = await bench()
+    vm.send('/title 没服务')
+    expect(vm.getState().messages.at(-1)?.text).toContain('标题服务未挂载')
+    vm.send('/title')
+    expect(vm.getState().messages.at(-1)?.text).toContain('/title <text>')
+  })
+
+  it('the arrow keys walk back through the prompts sent this process', async () => {
+    const { vm } = await bench()
+    vm.send('第一问')
+    vm.send('第二问')
+    expect(vm.historyOlder('')).toBe('第二问')
+    expect(vm.historyOlder('')).toBe('第一问')
+    expect(vm.historyOlder('')).toBe('第一问')
+    expect(vm.historyNewer('')).toBe('第二问')
+    expect(vm.historyNewer('')).toBe('')
+    expect(vm.historyNewer('')).toBeNull()
+    expect(vm.historyOlder('草稿')).toBe('第二问')
+    expect(vm.historyNewer('')).toBe('草稿')
+  })
+})
+
 describe('createViewModel approval', () => {
   it('answers the pending question and resolves the requester', async () => {
     const ctx = new Context()

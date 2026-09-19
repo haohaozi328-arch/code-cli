@@ -62,6 +62,9 @@
       "path": "../../session/session-projection-cache"
     },
     {
+      "path": "../../session/session-title"
+    },
+    {
       "path": "../../boot/cmdline"
     },
     {
