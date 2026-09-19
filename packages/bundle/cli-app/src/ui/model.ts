@@ -111,6 +111,20 @@ export interface TurnEntry {
   tools: string[]
   /** Output tokens this turn's assistant messages reported. */
   outputTokens: number
+  /** The turn's conversation as folded from the log, oldest first. */
+  messages: readonly TurnMessage[]
+}
+
+/** One conversation message rendered by the board's content pane. */
+export interface TurnMessage {
+  /** `user` prompts and `assistant` replies; `tool` rows render as a name line. */
+  role: 'user' | 'assistant' | 'tool'
+  /** Epoch milliseconds when the event committed. */
+  time: number
+  /** Message text; empty for tool rows. */
+  text: string
+  /** Tool name (role === 'tool'). */
+  toolName?: string
 }
 
 /** Whole-screen snapshot handed to React through useSyncExternalStore. */

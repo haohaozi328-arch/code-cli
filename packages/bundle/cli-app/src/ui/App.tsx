@@ -25,7 +25,7 @@ import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker } 
 import { MessageRow } from './messages.tsx'
 import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
 import { TaskPanel } from './todos.tsx'
-import { TaskBoard, isBoardToggle } from './taskboard.tsx'
+import { TIMELINE_PAGE, TaskBoard, isBoardToggle, stepTimelineCursor } from './taskboard.tsx'
 import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
 import type { ThemeTokens } from './theme.ts'
 import type { UiChrome } from './chrome.ts'
@@ -150,6 +150,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null)
   // Ctrl+T fold for the agent task panel.
   const [todosCollapsed, setTodosCollapsed] = useState(false)
+  // The board's timeline cursor: -1 follows the live turn; the arrow keys drag
+  // it through history while the board's content pane renders that turn.
+  const [boardCursor, setBoardCursor] = useState(-1)
 
   const pickerOpen = state.pickerOpen
   const choicePicker = state.choicePicker
@@ -193,6 +196,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   useEffect(() => {
     if (choicePicker !== null) setChoiceIndex(0)
   }, [choicePicker])
+  // Opening the board always lands on the live turn.
+  useEffect(() => {
+    if (state.boardOpen) setBoardCursor(-1)
+  }, [state.boardOpen])
   // The command menu follows the buffer; reset the highlight on every edit.
   useEffect(() => {
     setCommandIndex(0)
@@ -206,7 +213,24 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       vm.toggleBoard()
       return
     }
-    if (state.boardOpen) return
+    // While the board is up the keys drag the timeline instead of typing.
+    if (state.boardOpen) {
+      if (key.upArrow || key.downArrow) {
+        setBoardCursor(prev => stepTimelineCursor(prev, state.turnTimeline.length, key))
+        return
+      }
+      if (key.pageUp || key.pageDown) {
+        setBoardCursor((prev) => {
+          const length = state.turnTimeline.length
+          const current = prev === -1 ? length - 1 : Math.min(prev, length - 1)
+          const next = key.pageUp ? current - TIMELINE_PAGE : current + TIMELINE_PAGE
+          if (next >= length - 1) return -1
+          return Math.max(0, next)
+        })
+        return
+      }
+      return
+    }
     // Priority 1: tool approval question.
     if (pendingApproval !== null) {
       if (lower === 'a') vm.resolveApproval('allowed-once')
@@ -470,7 +494,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   // The board replaces the whole chrome: one full-screen monitoring surface
   // over the same view-model state the transcript renders from.
   if (state.boardOpen) {
-    return <TaskBoard state={state} theme={theme} elapsedMs={elapsedMs} />
+    return <TaskBoard state={state} theme={theme} elapsedMs={elapsedMs} cursor={boardCursor} />
   }
 
   if (chrome === 'opencode') {

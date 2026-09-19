@@ -1,18 +1,19 @@
 /**
  * The dsh-taskboard: a full-screen task-progress-and-time board. Ctrl+B
  * swaps the whole chrome for this surface; the same chord returns. The board
- * reads only state the view model already projects — the `todo/write`
- * checklist and the per-turn conversation timeline folded from the durable
- * log (`turn/start`/`user/message`/`assistant/message`/`tool/call`/
- * `turn/end`) — so it can never disagree with the transcript about what
- * happened, and a resumed session replays its whole board from the log.
+ * is a two-pane scrubber: the timeline pane lists the session's turns (one
+ * row per `turn/start`..`turn/end` span), and the arrow keys drag a cursor
+ * through history while the content pane renders the selected turn's full
+ * conversation — prompts, replies, and tool calls folded from the durable
+ * log, so the board can never disagree with the transcript and a resumed
+ * session replays its whole board from the log.
  * @module @dsh-external/dsh-cli-app/ui/taskboard
  */
 import React from 'react'
 import { Box, Text } from 'ink'
 import { COPY } from './copy.ts'
 import { blocksToText, collapseFirstLine } from './transcript.ts'
-import type { TurnEntry, ViewModel } from './model.ts'
+import type { TurnEntry, TurnMessage, ViewModel } from './model.ts'
 import { TodoRow } from './todos.tsx'
 import { formatElapsed, spinnerFrame } from './spinner.ts'
 import { contextBand, contextRing, formatTokenCount } from './status.ts'
@@ -20,11 +21,16 @@ import type { ThemeTokens } from './theme.ts'
 
 /** How many recent turns the board keeps; older entries fall off the tail. */
 export const TURN_TIMELINE_LIMIT = 12
+/** How many conversation messages one turn entry retains. */
+export const TURN_MESSAGE_LIMIT = 40
+/** How many rendered lines one conversation message gets before truncation. */
+export const MESSAGE_LINE_LIMIT = 8
+/** How many entries PageUp/PageDown move the timeline cursor. */
+export const TIMELINE_PAGE = 5
 
 /** Prompt/reply summary widths in the timeline rows. */
-const PROMPT_WIDTH = 56
-const REPLY_WIDTH = 64
-const MAX_TOOL_NAMES = 3
+const PROMPT_WIDTH = 48
+const REPLY_WIDTH = 60
 
 /** The minimal key facts the board renders; `ReturnType<ViewModel['getState']>`. */
 type BoardState = ReturnType<ViewModel['getState']>
@@ -46,6 +52,33 @@ export function formatClock(ms: number): string {
   const hh = String(date.getHours()).padStart(2, '0')
   const mm = String(date.getMinutes()).padStart(2, '0')
   return `${hh}:${mm}`
+}
+
+/**
+ * Move the timeline cursor one step from an ink key event. The cursor is an
+ * index into the entry list, with `-1` meaning "live" (the newest entry,
+ * following new events as they land).
+ * @param index - current cursor (`-1` for live).
+ * @param length - entry count; zero disables all movement.
+ * @param key - the parsed ink key flags of the navigation event.
+ * @returns the next cursor value.
+ */
+export function stepTimelineCursor(
+  index: number,
+  length: number,
+  key: { upArrow: boolean; downArrow: boolean },
+): number {
+  if (length === 0) return -1
+  const current = index === -1 ? length - 1 : Math.min(index, length - 1)
+  if (key.upArrow) return current === 0 ? 0 : current - 1
+  if (key.downArrow) return current === length - 1 ? -1 : current + 1
+  return index
+}
+
+/** Appends one conversation message, keeping only the most recent TURN_MESSAGE_LIMIT of them. */
+function appendMessage(messages: readonly TurnMessage[], message: TurnMessage): TurnMessage[] {
+  const next = [...messages, message]
+  return next.length > TURN_MESSAGE_LIMIT ? next.slice(-TURN_MESSAGE_LIMIT) : next
 }
 
 /** The turn counter carried by a `turn/*` event payload. */
@@ -73,6 +106,13 @@ function replyOf(data: unknown): { reply: string; outputTokens: number } {
   return { reply, outputTokens: tokens }
 }
 
+/** Full text of one conversation message payload. */
+function messageText(data: unknown): string {
+  const payload = data as { content?: unknown; message?: { content?: unknown[] } }
+  const content = payload.content ?? payload.message?.content
+  return Array.isArray(content) ? blocksToText(content as never[]).text : ''
+}
+
 /**
  * Fold one committed session event into the conversation timeline. Pure and
  * reference-stable: unchanged input returns the same array, a turn event or
@@ -89,6 +129,7 @@ export function reduceTurnEntries(
     const next = [...entries, {
       turn: turnNumberOf(event.data), startedAt: event.time, endedAt: null,
       prompt: '', reply: '', tools: [] as string[], outputTokens: 0,
+      messages: [] as TurnMessage[],
     }]
     return next.length > TURN_TIMELINE_LIMIT ? next.slice(next.length - TURN_TIMELINE_LIMIT) : next
   }
@@ -106,25 +147,32 @@ export function reduceTurnEntries(
     const prompt = promptOf(event.data)
     if (prompt === '') return entries
     const next = [...entries]
-    next[open] = { ...current, prompt }
+    const messages = appendMessage(current.messages, { role: 'user' as const, time: event.time, text: messageText(event.data) })
+    next[open] = { ...current, prompt, messages }
     return next
   }
   if (event.type === 'assistant/message') {
     const { reply, outputTokens } = replyOf(event.data)
-    if (reply === '' && outputTokens === 0) return entries
+    const text = messageText(event.data)
+    if (reply === '' && outputTokens === 0 && text === '') return entries
     const next = [...entries]
     next[open] = {
       ...current,
       ...(reply !== '' ? { reply } : {}),
       outputTokens: current.outputTokens + outputTokens,
+      ...(text === '' ? {} : { messages: appendMessage(current.messages, { role: 'assistant' as const, time: event.time, text }) }),
     }
     return next
   }
   if (event.type === 'tool/call') {
     const name = (event.data as { name?: unknown }).name
-    if (typeof name !== 'string' || name === '' || current.tools.includes(name)) return entries
+    if (typeof name !== 'string' || name === '') return entries
     const next = [...entries]
-    next[open] = { ...current, tools: [...current.tools, name] }
+    next[open] = {
+      ...current,
+      ...(current.tools.includes(name) ? {} : { tools: [...current.tools, name] }),
+      messages: appendMessage(current.messages, { role: 'tool' as const, time: event.time, text: '', toolName: name }),
+    }
     return next
   }
   return entries
@@ -150,48 +198,57 @@ function entryDuration(entry: TurnEntry, running: boolean, elapsedMs: number): s
   return running ? formatElapsed(elapsedMs) : COPY.measurementUnavailable
 }
 
-/** One timeline entry: header clock span, the prompt, the reply, and the tools. */
-function TurnRow(props: { entry: TurnEntry; running: boolean; elapsedMs: number; theme: ThemeTokens }): React.JSX.Element {
-  const { entry, running, elapsedMs, theme } = props
-  const open = entry.endedAt === null
+/** Render at most the first lines of one conversation message. */
+function renderLines(text: string, theme: ThemeTokens, key: string): React.JSX.Element {
+  const lines = text.split('\n')
+  const shown = lines.slice(0, MESSAGE_LINE_LIMIT)
+  const rest = lines.length - shown.length
   return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text color={open && running ? theme.warn : theme.muted} dimColor={!open || !running}>
-        {`#${entry.turn}  ${formatClock(entry.startedAt)} → ${open ? '··' : formatClock(entry.endedAt ?? entry.startedAt)}  ${entryDuration(entry, running, elapsedMs)}`}
-        {entry.outputTokens > 0 && <Text> · {formatTokenCount(entry.outputTokens)} tok</Text>}
-      </Text>
-      {entry.prompt !== '' && (
-        <Text color={theme.text}>
-          <Text color={theme.brand}>{COPY.userLabel}: </Text>
-          {entry.prompt}
-        </Text>
-      )}
-      {entry.reply !== '' && (
-        <Text color={theme.muted}>
-          <Text color={theme.ok}>{COPY.boardReplyGlyph}: </Text>
-          {entry.reply}
-        </Text>
-      )}
-      {entry.tools.length > 0 && (
-        <Text color={theme.muted} dimColor>
-          {COPY.defaultToolGlyph} {entry.tools.slice(0, MAX_TOOL_NAMES).join(' · ')}
-          {entry.tools.length > MAX_TOOL_NAMES && <Text> +{entry.tools.length - MAX_TOOL_NAMES}</Text>}
-        </Text>
-      )}
+    <Box key={key} flexDirection="column">
+      {shown.map((line, index) => <Text key={`${key}:${index}`} wrap="end">{line}</Text>)}
+      {rest > 0 && <Text color={theme.muted} dimColor>{COPY.boardMoreLines} {rest}</Text>}
     </Box>
   )
 }
 
-/** The full-screen task-progress-and-time board. */
+/** One timeline axis row; the cursor marks the entry shown in the content pane. */
+function AxisRow(props: {
+  entry: TurnEntry
+  selected: boolean
+  live: boolean
+  running: boolean
+  elapsedMs: number
+  theme: ThemeTokens
+}): React.JSX.Element {
+  const { entry, selected, live, running, elapsedMs, theme } = props
+  const open = entry.endedAt === null
+  const cursor = live ? COPY.boardLiveCursor : selected ? COPY.boardAxisCursor : ' '
+  const summary = entry.prompt !== '' ? entry.prompt : entry.reply !== '' ? entry.reply : COPY.axisEmpty
+  return (
+    <Text color={selected || live ? theme.text : theme.muted} dimColor={!selected && !live}>
+      <Text color={live ? theme.warn : selected ? theme.brand : theme.muted} bold={selected}>{cursor} </Text>
+      {`#${entry.turn} ${formatClock(entry.startedAt)}→${open ? '··' : formatClock(entry.endedAt ?? entry.startedAt)} ${entryDuration(entry, running, elapsedMs)}  `}
+      {collapseFirstLine(summary, PROMPT_WIDTH)}
+    </Text>
+  )
+}
+
+/** The full-screen task-progress-and-time board with a draggable timeline. */
 export function TaskBoard(props: {
   state: BoardState
   theme: ThemeTokens
   /** Live elapsed of the running turn, ticking from the App's clock. */
   elapsedMs: number
+  /** Timeline cursor into `state.turnTimeline`; `-1` follows the live turn. */
+  cursor: number
 }): React.JSX.Element {
-  const { state, theme, elapsedMs } = props
+  const { state, theme, elapsedMs, cursor } = props
   const todos = state.todos
   const done = todos?.filter(todo => todo.status === 'completed').length ?? 0
+  const length = state.turnTimeline.length
+  const selected = cursor === -1 ? length - 1 : Math.min(cursor, length - 1)
+  const entry = selected >= 0 ? state.turnTimeline[selected] : undefined
+  const live = cursor === -1
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} paddingX={1} margin={1}>
@@ -219,18 +276,60 @@ export function TaskBoard(props: {
       </Box>
 
       <Box marginTop={1} flexDirection="column">
-        <Text color={theme.brand} bold>{COPY.boardTurnNow}</Text>
-        {state.running
-          ? (
-            <Text color={theme.warn}>
-              {spinnerFrame(elapsedMs)} {COPY.statusRunning} · {formatElapsed(elapsedMs)}
-              {state.queued.length > 0 && (
-                <Text color={theme.muted} dimColor>  ·  {COPY.boardQueueLabel} {state.queued.length}</Text>
-              )}
-            </Text>
-          )
-          : <Text color={theme.muted} dimColor>{COPY.statusIdle}</Text>}
+        <Text color={theme.brand} bold>{COPY.boardTimeline}</Text>
+        {length === 0
+          ? <Text color={theme.muted} dimColor>{COPY.boardEmptySpans}</Text>
+          : [...state.turnTimeline].reverse().map((row, reverseIndex) => {
+            const index = length - 1 - reverseIndex
+            return (
+              <AxisRow
+                key={`${row.turn}:${row.startedAt}`}
+                entry={row}
+                selected={index === selected}
+                live={index === length - 1 && live}
+                running={state.running && index === length - 1}
+                elapsedMs={elapsedMs}
+                theme={theme}
+              />
+            )
+          })}
       </Box>
+
+      {entry !== undefined && (
+        <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor={theme.muted} paddingX={1}>
+          <Text>
+            <Text color={theme.brand} bold>
+              {`#${entry.turn} ${formatClock(entry.startedAt)} → ${entry.endedAt === null ? '··' : formatClock(entry.endedAt)}  ${entryDuration(entry, state.running, elapsedMs)}`}
+            </Text>
+            {entry.outputTokens > 0 && (
+              <Text color={theme.muted} dimColor> · {formatTokenCount(entry.outputTokens)} tok</Text>
+            )}
+            {entry.endedAt === null && state.running && (
+              <Text color={theme.warn}> · {COPY.boardLiveSuffix}</Text>
+            )}
+          </Text>
+          {entry.messages.length === 0
+            ? <Text color={theme.muted} dimColor>{COPY.boardNoMessages}</Text>
+            : entry.messages.map((message, index) => {
+              if (message.role === 'tool') {
+                return (
+                  <Text key={`t:${message.time}:${index}`} color={theme.muted} dimColor>
+                    {COPY.defaultToolGlyph} {message.toolName}
+                  </Text>
+                )
+              }
+              const label = message.role === 'user'
+                ? <Text color={theme.brand}>{COPY.userLabel}: </Text>
+                : <Text color={theme.ok}>{COPY.boardReplyGlyph}: </Text>
+              return (
+                <Box key={`m:${message.time}:${index}`} marginTop={index === 0 ? 0 : 1} flexDirection="column">
+                  <Text>{label}</Text>
+                  {renderLines(message.text, theme, `m:${message.time}:${index}`)}
+                </Box>
+              )
+            })}
+        </Box>
+      )}
 
       <Box marginTop={1} flexDirection="column">
         <Text>
@@ -238,19 +337,16 @@ export function TaskBoard(props: {
           {todos !== null && todos.length > 0 && (
             <Text color={theme.muted} dimColor>  {done}/{todos.length}</Text>
           )}
+          {state.running && (
+            <Text color={theme.warn}>  ·  {spinnerFrame(elapsedMs)} {COPY.statusRunning} · {formatElapsed(elapsedMs)}</Text>
+          )}
+          {state.queued.length > 0 && (
+            <Text color={theme.muted} dimColor>  ·  {COPY.boardQueueLabel} {state.queued.length}</Text>
+          )}
         </Text>
         {todos === null || todos.length === 0
           ? <Text color={theme.muted} dimColor>{COPY.boardNoTodos}</Text>
           : todos.map(todo => <TodoRow key={todo.content} todo={todo} theme={theme} />)}
-      </Box>
-
-      <Box marginTop={1} flexDirection="column">
-        <Text color={theme.brand} bold>{COPY.boardTimeline}</Text>
-        {state.turnTimeline.length === 0
-          ? <Text color={theme.muted} dimColor>{COPY.boardEmptySpans}</Text>
-          : [...state.turnTimeline].reverse().map(entry => (
-            <TurnRow key={`${entry.turn}:${entry.startedAt}`} entry={entry} running={state.running} elapsedMs={elapsedMs} theme={theme} />
-          ))}
       </Box>
 
       {state.pendingApproval !== null && (

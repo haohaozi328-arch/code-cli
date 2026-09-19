@@ -1,7 +1,7 @@
 /**
- * The dsh-taskboard's conversation timeline: the per-turn fold over durable
- * session events (`turn/start`, `user/message`, `assistant/message`,
- * `tool/call`, `turn/end`), the toggle chord, clock labels, and the
+ * The dsh-taskboard's conversation timeline scrubber: the per-turn fold over
+ * durable session events (full messages, not just summaries), the Ctrl+B
+ * toggle chord, the draggable timeline cursor, clock labels, and the
  * full-screen render. The timeline mirrors the durable log, so the board can
  * never disagree with the transcript about what ran when.
  * @module tests/taskboard.spec
@@ -23,6 +23,7 @@ import {
   formatClock,
   isBoardToggle,
   reduceTurnEntries,
+  stepTimelineCursor,
 } from '../src/ui/index.ts'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
@@ -84,32 +85,37 @@ function boardState(overrides: Partial<UiState> = {}): UiState {
 }
 
 describe('reduceTurnEntries', () => {
-  it('folds prompt, reply, tools, and tokens into the open turn', () => {
+  it('folds full messages, summary fields, tools, and tokens into the turn', () => {
     let entries: readonly TurnEntry[] = []
     entries = reduceTurnEntries(entries, turnStart(1, 1000))
     entries = reduceTurnEntries(entries, toolCall('bash', 1100))
     entries = reduceTurnEntries(entries, userMessage('修复会话列表的过滤条件', 1200))
-    entries = reduceTurnEntries(entries, assistantMessage('已定位到 sessions.ts 的 blank 过滤。\n第二行忽略', 2000, 321))
+    entries = reduceTurnEntries(entries, assistantMessage('已定位到 sessions.ts 的 blank 过滤。\n第二行也保留', 2000, 321))
     entries = reduceTurnEntries(entries, turnEnd(1, 4000))
-    expect(entries).toEqual([{
-      turn: 1, startedAt: 1000, endedAt: 4000,
-      prompt: '修复会话列表的过滤条件',
-      reply: '已定位到 sessions.ts 的 blank 过滤。',
-      tools: ['bash'],
-      outputTokens: 321,
-    }])
+    expect(entries).toHaveLength(1)
+    const turn = entries[0]
+    expect(turn?.turn).toBe(1)
+    expect(turn?.startedAt).toBe(1000)
+    expect(turn?.endedAt).toBe(4000)
+    expect(turn?.prompt).toBe('修复会话列表的过滤条件')
+    expect(turn?.reply).toBe('已定位到 sessions.ts 的 blank 过滤。')
+    expect(turn?.tools).toEqual(['bash'])
+    expect(turn?.outputTokens).toBe(321)
+    expect(turn?.messages).toEqual([
+      { role: 'tool', time: 1100, text: '', toolName: 'bash' },
+      { role: 'user', time: 1200, text: '修复会话列表的过滤条件' },
+      { role: 'assistant', time: 2000, text: '已定位到 sessions.ts 的 blank 过滤。\n第二行也保留' },
+    ])
   })
 
-  it('keeps tool order, dedupes repeats, and overwrites the prompt with the latest one', () => {
+  it('keeps tool order, dedupes the axis list, and keeps every invocation in messages', () => {
     let entries: readonly TurnEntry[] = []
     entries = reduceTurnEntries(entries, turnStart(1, 1000))
     entries = reduceTurnEntries(entries, toolCall('bash', 1100))
     entries = reduceTurnEntries(entries, toolCall('bash', 1200))
     entries = reduceTurnEntries(entries, toolCall('str_replace_editor', 1300))
-    entries = reduceTurnEntries(entries, userMessage('第一条', 1400))
-    entries = reduceTurnEntries(entries, userMessage('第二条更正', 1500))
     expect(entries[0]?.tools).toEqual(['bash', 'str_replace_editor'])
-    expect(entries[0]?.prompt).toBe('第二条更正')
+    expect(entries[0]?.messages.filter(m => m.role === 'tool')).toHaveLength(3)
   })
 
   it('ignores injected user messages and keeps the reference when nothing changes', () => {
@@ -145,10 +151,29 @@ describe('collectTurnEntries', () => {
       assistantMessage('a2', 3600, 200),
       turnEnd(2, 4000),
     ])
-    expect(timeline).toEqual([
-      { turn: 1, startedAt: 1000, endedAt: 2000, prompt: 'q1', reply: 'a1', tools: [], outputTokens: 100 },
-      { turn: 2, startedAt: 3000, endedAt: 4000, prompt: 'q2', reply: 'a2', tools: ['bash'], outputTokens: 200 },
-    ])
+    expect(timeline).toHaveLength(2)
+    expect(timeline[0]?.messages.map(m => m.role)).toEqual(['user', 'assistant'])
+    expect(timeline[1]?.prompt).toBe('q2')
+    expect(timeline[1]?.tools).toEqual(['bash'])
+    expect(timeline[1]?.outputTokens).toBe(200)
+  })
+})
+
+describe('stepTimelineCursor', () => {
+  const keys = {
+    up: { upArrow: true, downArrow: false, home: false, end: false },
+    down: { upArrow: false, downArrow: true, home: false, end: false },
+  }
+  it('starts live, drags up through history, and returns to live at the bottom', () => {
+    expect(stepTimelineCursor(-1, 3, keys.up)).toBe(1)
+    expect(stepTimelineCursor(1, 3, keys.up)).toBe(0)
+    expect(stepTimelineCursor(0, 3, keys.up)).toBe(0)
+    expect(stepTimelineCursor(0, 3, keys.down)).toBe(1)
+    expect(stepTimelineCursor(1, 3, keys.down)).toBe(2)
+    expect(stepTimelineCursor(2, 3, keys.down)).toBe(-1)
+  })
+  it('an empty timeline stays live whatever the key', () => {
+    expect(stepTimelineCursor(0, 0, keys.up)).toBe(-1)
   })
 })
 
@@ -172,9 +197,20 @@ describe('formatClock', () => {
 })
 
 describe('TaskBoard render', () => {
+  const now = Date.now()
+  const timeline = collectTurnEntries([
+    turnStart(1, now - 90_000),
+    toolCall('bash', now - 89_000),
+    userMessage('修复会话列表的过滤条件', now - 88_000),
+    assistantMessage('已定位到 sessions.ts 的过滤条件并修复。\n补充：补了三条回归用例。\n另外更新了 README。\n还跑了一遍 lint。', now - 60_000, 321),
+    turnEnd(1, now - 48_000),
+    turnStart(2, now - 5_000),
+    userMessage('跑一遍全量测试', now - 4_000),
+  ])
+
   it('shows session header, readouts, empty-task and empty-timeline hints', () => {
     const { frames } = render(
-      React.createElement(TaskBoard, { state: boardState({ sessionLabel: '看板验证 · dsh-cli' }), theme, elapsedMs: 0 }),
+      React.createElement(TaskBoard, { state: boardState({ sessionLabel: '看板验证 · dsh-cli' }), theme, elapsedMs: 0, cursor: -1 }),
     )
     const frame = frames.at(-1) ?? ''
     expect(frame).toContain(COPY.boardTitle)
@@ -185,17 +221,7 @@ describe('TaskBoard render', () => {
     expect(frame).toContain('1.5K')
   })
 
-  it('renders the conversation timeline: prompt, reply, tools, tokens per turn', () => {
-    const now = Date.now()
-    const timeline = collectTurnEntries([
-      turnStart(1, now - 90_000),
-      toolCall('bash', now - 89_000),
-      userMessage('修复会话列表的过滤条件', now - 88_000),
-      assistantMessage('已定位到 sessions.ts 的过滤条件并修复。', now - 60_000, 321),
-      turnEnd(1, now - 48_000),
-      turnStart(2, now - 5_000),
-      userMessage('跑一遍全量测试', now - 4_000),
-    ])
+  it('renders the timeline axis, the selected turn content, tools, and tokens', () => {
     const { frames } = render(
       React.createElement(TaskBoard, {
         state: boardState({
@@ -204,27 +230,36 @@ describe('TaskBoard render', () => {
           todos: [
             { content: '梳理目录结构', status: 'completed' },
             { content: '修复会话列表', status: 'in_progress' },
-            { content: '补回归用例', status: 'pending' },
           ],
           turnTimeline: timeline,
         }),
         theme,
         elapsedMs: 65_000,
+        cursor: -1,
       }),
     )
     const frame = frames.at(-1) ?? ''
     expect(frame).toContain('[✓] 梳理目录结构')
     expect(frame).toContain('[•] 修复会话列表')
-    expect(frame).toContain('[ ] 补回归用例')
     expect(frame).toContain('1m5s')
     expect(frame).toContain(`${COPY.boardQueueLabel} 2`)
     expect(frame).toContain('#1')
-    expect(frame).toContain('你: 修复会话列表的过滤条件')
-    expect(frame).toContain('已定位到 sessions.ts 的过滤条件并修复。')
-    expect(frame).toContain('⚙ bash')
-    expect(frame).toContain('321 tok')
     expect(frame).toContain('#2')
-    expect(frame).toContain('你: 跑一遍全量测试')
+    expect(frame).toContain('你')
+    expect(frame).toContain('跑一遍全量测试')
+  })
+
+  it('shows the historical turn content when the cursor drags back', () => {
+    const { frames } = render(
+      React.createElement(TaskBoard, { state: boardState({ turnTimeline: timeline }), theme, elapsedMs: 0, cursor: 0 }),
+    )
+    const frame = frames.at(-1) ?? ''
+    expect(frame).toContain('修复会话列表的过滤条件')
+    expect(frame).toContain('已定位到 sessions.ts 的过滤条件并修复。')
+    expect(frame).toContain('321 tok')
+    expect(frame).toContain('⚙ bash')
+    expect(frame).toContain(COPY.boardAxisCursor)
+    expect(frame).toContain(COPY.boardAxisCursor)
   })
 
   it('flags a pending approval so the board cannot hide an unanswered gate', () => {
@@ -233,6 +268,7 @@ describe('TaskBoard render', () => {
         state: boardState({ pendingApproval: { toolName: 'bash', reason: 'demo' } }),
         theme,
         elapsedMs: 0,
+        cursor: -1,
       }),
     )
     expect(frames.at(-1)).toContain(COPY.boardApprovalPending)
