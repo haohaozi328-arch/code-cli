@@ -68,6 +68,7 @@ export const COPY = {
   boardAxisCursor: '❯',
   boardLiveSuffix: '进行中',
   boardMoreLines: '…还有',
+  boardMoreMessages: '…更早还有',
   boardNoMessages: '该回合暂无对话内容',
   axisEmpty: '（空回合）',
   boardNavHint: '↑↓ 选择回合 · Home 回到最新 · End 最早 · Esc 返回对话',

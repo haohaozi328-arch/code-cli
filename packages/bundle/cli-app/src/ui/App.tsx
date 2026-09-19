@@ -415,14 +415,18 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   // Ink writes new static items permanently above the live region; re-keying on
   // the session (and on /clear) rebuilds that list instead of repainting it.
-  const transcript = (
-    <>
-      <Static key={`${state.sessionId}:${state.transcriptEpoch}`} items={committed}>
-        {renderRow}
-      </Static>
-      <Box flexDirection="column">{live.map(renderRow)}</Box>
-    </>
+  // The Static element is the first child of EVERY return branch below, so React
+  // keeps its fiber mounted across board and picker switches. An unmounted Static
+  // remounts at index 0 and re-renders the whole transcript as fresh static
+  // output: ink appends that to its retained full-static buffer and replays all
+  // of it on every taller-than-terminal frame, which floods stdout until the
+  // stream's backpressure piles the unsent bytes onto the heap.
+  const staticList = (
+    <Static key={`${state.sessionId}:${state.transcriptEpoch}`} items={committed}>
+      {renderRow}
+    </Static>
   )
+  const liveList = <Box flexDirection="column">{live.map(renderRow)}</Box>
 
   const overlays = (
     <>
@@ -494,7 +498,19 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   // The board replaces the whole chrome: one full-screen monitoring surface
   // over the same view-model state the transcript renders from.
   if (state.boardOpen) {
-    return <TaskBoard state={state} theme={theme} elapsedMs={elapsedMs} cursor={boardCursor} />
+    return (
+      <Box flexDirection="column">
+        {staticList}
+        <TaskBoard
+          state={state}
+          theme={theme}
+          elapsedMs={elapsedMs}
+          cursor={boardCursor}
+          rows={rows}
+          columns={columns}
+        />
+      </Box>
+    )
   }
 
   if (chrome === 'opencode') {
@@ -502,6 +518,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     if (pickerOpen) {
       return (
         <Box width="100%" height={Math.max(8, rows - 2)} alignItems="center" justifyContent="center">
+          {staticList}
           <Box width={Math.min(columnWidth, 78)}>
             <SessionPicker items={filteredSessions} selected={safePickerIndex} search={sessionSearch} theme={theme} />
           </Box>
@@ -514,6 +531,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       const verticalOffset = Math.max(0, Math.floor((rows - 10) / 2))
       return (
         <Box flexDirection="column" width="100%" marginTop={verticalOffset}>
+          {staticList}
           <Box width="100%" justifyContent="center">
             <Box width={columnWidth} flexDirection="column">
               <Box justifyContent="center">
@@ -536,7 +554,8 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     }
     return (
       <Box flexDirection="column" width="100%">
-        {transcript}
+        {staticList}
+        {liveList}
         {overlays}
         {todosVisible && <TaskPanel todos={todos} theme={theme} />}
         {queuedNote}
@@ -547,7 +566,8 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   return (
     <Box flexDirection="column">
-      {transcript}
+      {staticList}
+      {liveList}
       {pickerOpen && <SessionPicker items={filteredSessions} selected={safePickerIndex} search={sessionSearch} theme={theme} />}
       {overlays}
       {todosVisible && <TaskPanel todos={todos} theme={theme} />}

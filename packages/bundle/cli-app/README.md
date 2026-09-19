@@ -48,7 +48,7 @@ The `cli` profile is a user-layer directory (`~/.dsh/profiles/cli`) whose bundle
 - A metered status line: `token 42.5/s` throughput, cumulative usage, and a context-occupancy ring that steps down the moment compaction lands.
 - A braille spinner with elapsed time while the agent runs; prompts typed while running queue FIFO and drain one per idle edge (slash commands are never queued).
 - Two layouts over one interaction kernel: `classic` (single column, `❯` prompt, bottom status line) and the opencode style (centered welcome for empty sessions, full-width conversation afterwards).
-- A full-screen task board (`dsh-taskboard`): `Ctrl+B` swaps the conversation for a board showing the task checklist, a draggable per-turn conversation timeline — the arrow keys or PageUp/PageDown select a turn and a content pane shows that turn's full conversation (clock span, your prompt, the assistant reply, tool calls, and output tokens), while `●` marks the live turn and `❯` the selected one — plus the live running elapsed time, queue depth, and the usage/context readouts; the same chord returns.
+- A full-screen task board (`dsh-taskboard`): `Ctrl+B` swaps the conversation for a board showing the task checklist, a draggable per-turn conversation timeline — the arrow keys or PageUp/PageDown select a turn and a content pane shows that turn's conversation, clamped to the terminal height with the newest messages first (clock span, your prompt, the assistant reply, tool calls, and output tokens), while `●` marks the live turn and `❯` the selected one — plus the live running elapsed time, queue depth, and the usage/context readouts; the same chord returns.
 
 -----
 

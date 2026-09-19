@@ -210,7 +210,7 @@ describe('TaskBoard render', () => {
 
   it('shows session header, readouts, empty-task and empty-timeline hints', () => {
     const { frames } = render(
-      React.createElement(TaskBoard, { state: boardState({ sessionLabel: '看板验证 · dsh-cli' }), theme, elapsedMs: 0, cursor: -1 }),
+      React.createElement(TaskBoard, { state: boardState({ sessionLabel: '看板验证 · dsh-cli' }), theme, elapsedMs: 0, cursor: -1, rows: 44, columns: 110 }),
     )
     const frame = frames.at(-1) ?? ''
     expect(frame).toContain(COPY.boardTitle)
@@ -236,6 +236,8 @@ describe('TaskBoard render', () => {
         theme,
         elapsedMs: 65_000,
         cursor: -1,
+        rows: 44,
+        columns: 110,
       }),
     )
     const frame = frames.at(-1) ?? ''
@@ -251,7 +253,14 @@ describe('TaskBoard render', () => {
 
   it('shows the historical turn content when the cursor drags back', () => {
     const { frames } = render(
-      React.createElement(TaskBoard, { state: boardState({ turnTimeline: timeline }), theme, elapsedMs: 0, cursor: 0 }),
+      React.createElement(TaskBoard, {
+        state: boardState({ turnTimeline: timeline }),
+        theme,
+        elapsedMs: 0,
+        cursor: 0,
+        rows: 44,
+        columns: 110,
+      }),
     )
     const frame = frames.at(-1) ?? ''
     expect(frame).toContain('修复会话列表的过滤条件')
@@ -259,7 +268,38 @@ describe('TaskBoard render', () => {
     expect(frame).toContain('321 tok')
     expect(frame).toContain('⚙ bash')
     expect(frame).toContain(COPY.boardAxisCursor)
-    expect(frame).toContain(COPY.boardAxisCursor)
+  })
+
+  it('clamps itself below the terminal height so ink never replays the screen', () => {
+    const longLine = '字'.repeat(200)
+    const tall: TurnEntry[] = [{
+      turn: 1,
+      startedAt: now - 60_000,
+      endedAt: now,
+      prompt: '长回合',
+      reply: longLine,
+      tools: [],
+      outputTokens: 0,
+      messages: Array.from({ length: 40 }, (_, index) => ({
+        role: 'assistant' as const,
+        time: index,
+        text: index === 0 ? `最早的独有标记 ${longLine}` : `最新回复可见\n${longLine}`,
+      })),
+    }]
+    const rich = boardState({ turnTimeline: tall })
+    const tallFrame = render(
+      React.createElement(TaskBoard, { state: rich, theme, elapsedMs: 0, cursor: -1, rows: 40, columns: 60 }),
+    ).frames.at(-1) ?? ''
+    expect(tallFrame.split('\n').length).toBeLessThanOrEqual(40)
+    expect(tallFrame).toContain(COPY.boardMoreMessages)
+    expect(tallFrame).toContain('最新回复可见')
+    expect(tallFrame).not.toContain('最早的独有标记')
+
+    const smallFrame = render(
+      React.createElement(TaskBoard, { state: rich, theme, elapsedMs: 0, cursor: -1, rows: 20, columns: 60 }),
+    ).frames.at(-1) ?? ''
+    expect(smallFrame.split('\n').length).toBeLessThanOrEqual(20)
+    expect(smallFrame).not.toContain('最新回复可见')
   })
 
   it('flags a pending approval so the board cannot hide an unanswered gate', () => {
@@ -269,6 +309,8 @@ describe('TaskBoard render', () => {
         theme,
         elapsedMs: 0,
         cursor: -1,
+        rows: 44,
+        columns: 110,
       }),
     )
     expect(frames.at(-1)).toContain(COPY.boardApprovalPending)

@@ -11,6 +11,7 @@
  */
 import React from 'react'
 import { Box, Text } from 'ink'
+import stringWidth from 'string-width'
 import { COPY } from './copy.ts'
 import { blocksToText, collapseFirstLine } from './transcript.ts'
 import type { TurnEntry, TurnMessage, ViewModel } from './model.ts'
@@ -27,6 +28,12 @@ export const TURN_MESSAGE_LIMIT = 40
 export const MESSAGE_LINE_LIMIT = 8
 /** How many entries PageUp/PageDown move the timeline cursor. */
 export const TIMELINE_PAGE = 5
+/** Rows the board always spends on margins, border, title, meta, block labels, and the hint. */
+const BOARD_CHROME_ROWS = 16
+/** Rows the content pane needs at minimum to show the newest message block. */
+const PANE_MIN_ROWS = 11
+/** Cells the pane's padding and borders take away from the terminal width. */
+const PANE_WIDTH_CHROME = 8
 
 /** Prompt/reply summary widths in the timeline rows. */
 const PROMPT_WIDTH = 48
@@ -198,14 +205,31 @@ function entryDuration(entry: TurnEntry, running: boolean, elapsedMs: number): s
   return running ? formatElapsed(elapsedMs) : COPY.measurementUnavailable
 }
 
-/** Render at most the first lines of one conversation message. */
-function renderLines(text: string, theme: ThemeTokens, key: string): React.JSX.Element {
+/** One grapheme segmenter reused by width-aware truncation. */
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+
+/** Truncate one line to display cells so it can never wrap into a second physical row. */
+function truncateToWidth(value: string, columns: number): string {
+  if (stringWidth(value) <= columns) return value
+  let out = ''
+  let used = 0
+  for (const { segment } of GRAPHEMES.segment(value)) {
+    const width = stringWidth(segment)
+    if (used + width > columns - 1) break
+    out += segment
+    used += width
+  }
+  return `${out}…`
+}
+
+/** Render at most the first lines of one conversation message, each capped to one physical row. */
+function renderLines(text: string, theme: ThemeTokens, key: string, columns: number): React.JSX.Element {
   const lines = text.split('\n')
   const shown = lines.slice(0, MESSAGE_LINE_LIMIT)
   const rest = lines.length - shown.length
   return (
     <Box key={key} flexDirection="column">
-      {shown.map((line, index) => <Text key={`${key}:${index}`} wrap="end">{line}</Text>)}
+      {shown.map((line, index) => <Text key={`${key}:${index}`} wrap="end">{truncateToWidth(line, Math.max(20, columns - PANE_WIDTH_CHROME))}</Text>)}
       {rest > 0 && <Text color={theme.muted} dimColor>{COPY.boardMoreLines} {rest}</Text>}
     </Box>
   )
@@ -241,14 +265,49 @@ export function TaskBoard(props: {
   elapsedMs: number
   /** Timeline cursor into `state.turnTimeline`; `-1` follows the live turn. */
   cursor: number
+  /** Terminal height in rows; the board clamps itself below it. */
+  rows: number
+  /** Terminal width in columns; pane lines truncate to stay one row each. */
+  columns: number
 }): React.JSX.Element {
-  const { state, theme, elapsedMs, cursor } = props
+  const { state, theme, elapsedMs, cursor, rows, columns } = props
   const todos = state.todos
   const done = todos?.filter(todo => todo.status === 'completed').length ?? 0
   const length = state.turnTimeline.length
   const selected = cursor === -1 ? length - 1 : Math.min(cursor, length - 1)
   const entry = selected >= 0 ? state.turnTimeline[selected] : undefined
   const live = cursor === -1
+
+  // The board must stay shorter than the terminal: ink replays its whole
+  // retained static buffer whenever a frame reaches screen height, so a tall
+  // board would flood stdout on every paint. Rows split between the axis and
+  // the content pane; the pane hides when the newest message block cannot fit.
+  const todoRows = todos !== null && todos.length > 0 ? todos.length : 1
+  const available = Math.max(6, rows) - BOARD_CHROME_ROWS - todoRows - (state.pendingApproval !== null ? 2 : 0)
+  const axisRows = Math.min(TURN_TIMELINE_LIMIT, Math.max(1, Math.floor(available / 2)))
+  const paneBudget = Math.max(0, available - axisRows - 1)
+  const paneVisible = entry !== undefined && paneBudget >= PANE_MIN_ROWS
+  const shownAxisCount = paneVisible ? axisRows : Math.min(TURN_TIMELINE_LIMIT, Math.max(1, available))
+  let paneMessages: readonly TurnMessage[] = []
+  let paneDropped = 0
+  if (paneVisible && entry.messages.length > 0) {
+    let used = 0
+    let start = entry.messages.length
+    while (start > 0) {
+      const message = entry.messages[start - 1]
+      if (message === undefined) break
+      const lines = message.role === 'tool' ? 0 : message.text.split('\n').length
+      const cost = message.role === 'tool'
+        ? 1
+        : 2 + Math.min(MESSAGE_LINE_LIMIT, lines) + (lines > MESSAGE_LINE_LIMIT ? 1 : 0)
+      const gap = start === entry.messages.length ? 0 : 1
+      if (used + cost + gap > paneBudget) break
+      used += cost + gap
+      start -= 1
+    }
+    paneMessages = entry.messages.slice(start)
+    paneDropped = start
+  }
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} paddingX={1} margin={1}>
@@ -279,7 +338,7 @@ export function TaskBoard(props: {
         <Text color={theme.brand} bold>{COPY.boardTimeline}</Text>
         {length === 0
           ? <Text color={theme.muted} dimColor>{COPY.boardEmptySpans}</Text>
-          : [...state.turnTimeline].reverse().map((row, reverseIndex) => {
+          : [...state.turnTimeline].reverse().slice(0, shownAxisCount).map((row, reverseIndex) => {
             const index = length - 1 - reverseIndex
             return (
               <AxisRow
@@ -295,7 +354,7 @@ export function TaskBoard(props: {
           })}
       </Box>
 
-      {entry !== undefined && (
+      {paneVisible && (
         <Box marginTop={1} flexDirection="column" borderStyle="single" borderColor={theme.muted} paddingX={1}>
           <Text>
             <Text color={theme.brand} bold>
@@ -310,24 +369,31 @@ export function TaskBoard(props: {
           </Text>
           {entry.messages.length === 0
             ? <Text color={theme.muted} dimColor>{COPY.boardNoMessages}</Text>
-            : entry.messages.map((message, index) => {
-              if (message.role === 'tool') {
-                return (
-                  <Text key={`t:${message.time}:${index}`} color={theme.muted} dimColor>
-                    {COPY.defaultToolGlyph} {message.toolName}
-                  </Text>
-                )
-              }
-              const label = message.role === 'user'
-                ? <Text color={theme.brand}>{COPY.userLabel}: </Text>
-                : <Text color={theme.ok}>{COPY.boardReplyGlyph}: </Text>
-              return (
-                <Box key={`m:${message.time}:${index}`} marginTop={index === 0 ? 0 : 1} flexDirection="column">
-                  <Text>{label}</Text>
-                  {renderLines(message.text, theme, `m:${message.time}:${index}`)}
-                </Box>
-              )
-            })}
+            : (
+              <>
+                {paneDropped > 0 && (
+                  <Text color={theme.muted} dimColor>{COPY.boardMoreMessages} {paneDropped}</Text>
+                )}
+                {paneMessages.map((message, index) => {
+                  if (message.role === 'tool') {
+                    return (
+                      <Text key={`t:${message.time}:${index}`} color={theme.muted} dimColor>
+                        {COPY.defaultToolGlyph} {message.toolName}
+                      </Text>
+                    )
+                  }
+                  const label = message.role === 'user'
+                    ? <Text color={theme.brand}>{COPY.userLabel}: </Text>
+                    : <Text color={theme.ok}>{COPY.boardReplyGlyph}: </Text>
+                  return (
+                    <Box key={`m:${message.time}:${index}`} marginTop={index === 0 ? 0 : 1} flexDirection="column">
+                      <Text>{label}</Text>
+                      {renderLines(message.text, theme, `m:${message.time}:${index}`, columns)}
+                    </Box>
+                  )
+                })}
+              </>
+            )}
         </Box>
       )}
 
