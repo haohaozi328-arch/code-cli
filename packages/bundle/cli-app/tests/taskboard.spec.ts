@@ -80,6 +80,7 @@ function boardState(overrides: Partial<UiState> = {}): UiState {
     turnTimeline: [],
     choicePicker: null,
     connectWizard: null,
+    titleEditor: null,
     transcriptEpoch: 0,
     ...overrides,
   }
