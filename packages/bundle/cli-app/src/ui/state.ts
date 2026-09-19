@@ -446,7 +446,18 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         return
       case '/title': {
         if (rest === '') {
-          appendNotice(COPY.titleUsage)
+          // Bare /title reports the durable title: scan the live log for the
+          // latest session/title event, falling back to unnamed.
+          const events = session.snapshotEvents()
+          let title: string | null = null
+          for (let index = events.length - 1; index >= 0; index -= 1) {
+            const event = events[index]
+            if (event?.type === 'session/title') {
+              title = event.data.title
+              break
+            }
+          }
+          appendNotice(`${COPY.titleCurrent}：${title ?? '（未命名）'} · ${COPY.titleUsage}`)
           return
         }
         const titleService: SessionTitleService | undefined = ctx.get('sessionTitle')

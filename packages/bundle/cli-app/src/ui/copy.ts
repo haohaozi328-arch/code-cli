@@ -79,6 +79,7 @@ export const COPY = {
   boardNoTodos: '本会话暂无任务清单（agent 调 todo/write 后显示）',
   boardApprovalPending: '有工具审批待处理 — 返回对话确认',
   titleUsage: '/title <text> — 重命名当前会话',
+  titleCurrent: '当前标题',
   titleUnavailable: '标题服务未挂载，无法重命名',
   titleFailedPrefix: '/title 失败：',
 

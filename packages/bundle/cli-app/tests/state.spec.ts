@@ -654,7 +654,15 @@ describe('createViewModel title and history', () => {
     vm.send('/title 没服务')
     expect(vm.getState().messages.at(-1)?.text).toContain('标题服务未挂载')
     vm.send('/title')
+    expect(vm.getState().messages.at(-1)?.text).toContain('当前标题：（未命名）')
     expect(vm.getState().messages.at(-1)?.text).toContain('/title <text>')
+  })
+
+  it('bare /title reports the durable title after a rename', async () => {
+    const { agent, vm } = await bench()
+    agent.session.append('session/title', { title: '罗小黑', messageSeqs: [], source: { kind: 'user' } })
+    vm.send('/title')
+    expect(vm.getState().messages.at(-1)?.text).toContain('当前标题：罗小黑')
   })
 
   it('the arrow keys walk back through the prompts sent this process', async () => {
