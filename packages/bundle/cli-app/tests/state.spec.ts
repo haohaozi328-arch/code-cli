@@ -649,20 +649,45 @@ describe('createViewModel title and history', () => {
     expect(vm.getState().sessionLabel).toContain('投影标题')
   })
 
-  it('/title without the service explains itself, and bare /title shows usage', async () => {
+  it('/title without the service explains itself, and bare /title opens the editor', async () => {
     const { vm } = await bench()
     vm.send('/title 没服务')
     expect(vm.getState().messages.at(-1)?.text).toContain('标题服务未挂载')
     vm.send('/title')
-    expect(vm.getState().messages.at(-1)?.text).toContain('当前标题：（未命名）')
-    expect(vm.getState().messages.at(-1)?.text).toContain('/title <text>')
+    expect(vm.getState().titleEditor).toBeNull()
   })
 
-  it('bare /title reports the durable title after a rename', async () => {
+  it('bare /title opens the editor carrying the durable title; submit renames and closes', async () => {
     const { agent, vm } = await bench()
+    const { ctx } = { ctx: (vm as unknown as { ctx?: unknown }).ctx }
+    void ctx
+    const titleService = {
+      rename(target: Session, title: string) {
+        target.append('session/title', { title, messageSeqs: [], source: { kind: 'user' } })
+        return { title, messageSeqs: [], source: { kind: 'user' }, seq: 0, time: 0 }
+      },
+    }
+    const ctxAny = agent.ctx as { provide: (name: string, value: unknown) => void }
+    ctxAny.provide('sessionTitle', titleService)
     agent.session.append('session/title', { title: '罗小黑', messageSeqs: [], source: { kind: 'user' } })
     vm.send('/title')
-    expect(vm.getState().messages.at(-1)?.text).toContain('当前标题：罗小黑')
+    expect(vm.getState().titleEditor).toBe('罗小黑')
+    vm.submitTitle('')
+    expect(vm.getState().titleEditor).toBeNull()
+    expect(vm.getState().sessionLabel).toContain('罗小黑')
+    vm.send('/title')
+    vm.submitTitle('罗小黑看板')
+    expect(vm.getState().titleEditor).toBeNull()
+    expect(vm.getState().sessionLabel).toContain('罗小黑看板')
+  })
+
+  it('cancel closes the editor without renaming', async () => {
+    const { vm } = await bench()
+    const before = vm.getState().sessionLabel
+    vm.send('/title')
+    vm.cancelTitleEditor()
+    expect(vm.getState().titleEditor).toBeNull()
+    expect(vm.getState().sessionLabel).toBe(before)
   })
 
   it('the arrow keys walk back through the prompts sent this process', async () => {

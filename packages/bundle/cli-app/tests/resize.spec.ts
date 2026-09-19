@@ -274,6 +274,7 @@ function snapshot(): UiState {
     contextOccupancy: null,
     choicePicker: null,
     connectWizard: null,
+    titleEditor: null,
     transcriptEpoch: 0,
   }
 }
@@ -287,6 +288,9 @@ function viewModel(state: UiState): ViewModel {
     send: noop,
     historyOlder: () => null,
     historyNewer: () => null,
+    openTitleEditor: () => {},
+    submitTitle: () => {},
+    cancelTitleEditor: () => {},
     stop: noop,
     toggleBoard: noop,
     quit: noop,

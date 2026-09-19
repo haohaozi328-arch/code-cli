@@ -162,6 +162,8 @@ export interface UiState {
   choicePicker: ChoicePickerState | null
   /** Current `/connect` wizard, excluding the secret API key. */
   connectWizard: ConnectWizardState | null
+  /** The `/title` editor when open, carrying the session's current durable title (null when unnamed). */
+  titleEditor: string | null
   /** Incremented by `/clear`; the transcript view rebuilds from this counter. */
   transcriptEpoch: number
 }
@@ -215,6 +217,12 @@ export interface ViewModel {
   getState: () => UiState
   /** Queue a user turn and wake the driver; registry-command dispatch settles asynchronously. */
   send: (text: string) => void
+  /** Open the `/title` editor modal. */
+  openTitleEditor: () => void
+  /** Rename through the editor; an empty text closes it without acting. */
+  submitTitle: (text: string) => void
+  /** Close the `/title` editor without renaming. */
+  cancelTitleEditor: () => void
   /** Step the composer back through sent prompts; null when nothing is older. */
   historyOlder: (current: string) => string | null
   /** Step forward again; the preserved draft returns when stepping past the newest. */

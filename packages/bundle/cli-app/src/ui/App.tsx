@@ -21,7 +21,7 @@ import { COPY, WORDMARK } from './copy.ts'
 import type { UiMessage, ViewModel } from './model.ts'
 import { COMMAND_HINTS } from './state.ts'
 import { collapseFirstLine, splitTranscript } from './transcript.ts'
-import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker } from './overlays.tsx'
+import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker, TitlePrompt } from './overlays.tsx'
 import { MessageRow } from './messages.tsx'
 import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
 import { TaskPanel } from './todos.tsx'
@@ -159,6 +159,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const pickerOpen = state.pickerOpen
   const choicePicker = state.choicePicker
   const connectWizard = state.connectWizard
+  const titleEditor = state.titleEditor
   const pendingApproval = state.pendingApproval
   const running = state.running
   const elapsedMs = useRunningClock(running)
@@ -342,6 +343,26 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
       return
     }
+    // Priority 4.5: the /title text-field editor.
+    if (titleEditor !== null) {
+      if (key.return) {
+        vm.submitTitle(input)
+        setInput('')
+        return
+      }
+      if (key.escape || (key.ctrl && lower === 'c')) {
+        vm.cancelTitleEditor()
+        setInput('')
+        return
+      }
+      if (key.backspace || key.delete) {
+        setInput(prev => prev.slice(0, -1))
+        return
+      }
+      if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return
+      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      return
+    }
     // Priority 5: slash-command palette.
     if (commandMenuOpen) {
       if (key.upArrow) {
@@ -457,6 +478,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       )}
       <ApprovalModal prompt={pendingApproval} theme={theme} />
       {connectWizard !== null && <ConnectPrompt wizard={connectWizard} theme={theme} />}
+      {titleEditor !== null && <TitlePrompt current={titleEditor} theme={theme} />}
       {choicePicker !== null && (
         <ChoiceList title={choicePicker.title} items={choicePicker.items} selected={effectiveChoiceIndex} theme={theme} />
       )}
@@ -495,7 +517,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
         <Box>
           <Text color={theme.brand}>{'> '}</Text>
           {input === ''
-            ? <Text color={theme.muted} dimColor>{connectWizard !== null ? '' : COPY.composerPlaceholder}</Text>
+            ? <Text color={theme.muted} dimColor>{connectWizard !== null || titleEditor !== null ? '' : COPY.composerPlaceholder}</Text>
             : <Text color={theme.text}>{previewInput(input)}</Text>}
           <Text color={theme.brand}>{input === '' && !running ? '▌' : ''}</Text>
         </Box>

@@ -181,3 +181,18 @@ export function ConnectPrompt(props: {
   )
 }
 
+/** The /title editor: one text field over the shared composer buffer. */
+export function TitlePrompt(props: {
+  current: string | null
+  theme: ThemeTokens
+}): React.JSX.Element {
+  const { current, theme } = props
+  return (
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} marginBottom={1} paddingX={1}>
+      <Text color={theme.brand} bold>/title</Text>
+      <Text color={theme.text}>{COPY.titleCurrent}：{current ?? '（未命名）'}</Text>
+      <Text color={theme.muted} dimColor>{COPY.titleEditorHint}</Text>
+    </Box>
+  )
+}
+

@@ -35,6 +35,7 @@ function snapshot(overrides: Partial<UiState>): UiState {
     turnTimeline: [],
     choicePicker: null,
     connectWizard: null,
+    titleEditor: null,
     transcriptEpoch: 0,
     ...overrides,
   }
@@ -49,6 +50,9 @@ function viewModel(state: UiState): ViewModel {
     send: noop,
     historyOlder: () => null,
     historyNewer: () => null,
+    openTitleEditor: () => {},
+    submitTitle: () => {},
+    cancelTitleEditor: () => {},
     stop: noop,
     toggleBoard: noop,
     quit: noop,

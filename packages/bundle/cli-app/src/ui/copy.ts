@@ -80,6 +80,7 @@ export const COPY = {
   boardApprovalPending: '有工具审批待处理 — 返回对话确认',
   titleUsage: '/title <text> — 重命名当前会话',
   titleCurrent: '当前标题',
+  titleEditorHint: '输入新标题 · Enter 确认 · Esc 取消',
   titleUnavailable: '标题服务未挂载，无法重命名',
   titleFailedPrefix: '/title 失败：',
 

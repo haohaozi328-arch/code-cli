@@ -116,6 +116,8 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let error: string | null = null
   let pickerOpen = false
   let choicePicker: ChoicePickerState | null = null
+  // The /title editor: open captures the session's current durable title.
+  let titleEditor: string | null = null
   let pendingApproval: ApprovalPrompt | null = null
   let transcriptEpoch = 0
   let noticeSeq = 0
@@ -159,6 +161,15 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     meter?.measure(session).totalTokens,
     session.requestContext()?.contextWindow,
   )
+  /** Latest durable title from the live log, or null when never titled. */
+  const durableTitle = (): string | null => {
+    const events = session.snapshotEvents()
+    for (let index = events.length - 1; index >= 0; index -= 1) {
+      const event = events[index]
+      if (event?.type === 'session/title') return event.data.title
+    }
+    return null
+  }
 
   // Cached snapshot handed to useSyncExternalStore: React compares getSnapshot
   // results by reference, so a fresh object per call would re-render forever.
@@ -446,18 +457,9 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         return
       case '/title': {
         if (rest === '') {
-          // Bare /title reports the durable title: scan the live log for the
-          // latest session/title event, falling back to unnamed.
-          const events = session.snapshotEvents()
-          let title: string | null = null
-          for (let index = events.length - 1; index >= 0; index -= 1) {
-            const event = events[index]
-            if (event?.type === 'session/title') {
-              title = event.data.title
-              break
-            }
-          }
-          appendNotice(`${COPY.titleCurrent}：${title ?? '（未命名）'} · ${COPY.titleUsage}`)
+          // Bare /title opens the inline editor; the modal carries the current title.
+          titleEditor = durableTitle()
+          notify()
           return
         }
         const titleService: SessionTitleService | undefined = ctx.get('sessionTitle')
@@ -467,6 +469,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         }
         try {
           applyTitle(titleService.rename(session, rest).title)
+          titleEditor = null
         } catch (failure) {
           appendNotice(`${COPY.titleFailedPrefix}${failure instanceof Error ? failure.message : String(failure)}`)
         }
@@ -646,6 +649,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           turnTimeline,
           choicePicker,
           connectWizard: connect.state,
+          titleEditor,
           transcriptEpoch,
         }
       }
@@ -677,6 +681,35 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     },
     historyNewer(current) {
       return history.step(-1, current)
+    },
+    openTitleEditor() {
+      titleEditor = durableTitle()
+      notify()
+    },
+    submitTitle(text) {
+      titleEditor = null
+      const trimmed = text.trim()
+      if (trimmed === '') {
+        notify()
+        return
+      }
+      const titleService: SessionTitleService | undefined = ctx.get('sessionTitle')
+      if (titleService === undefined) {
+        appendNotice(COPY.titleUnavailable)
+        notify()
+        return
+      }
+      try {
+        applyTitle(titleService.rename(session, trimmed).title)
+      } catch (failure) {
+        appendNotice(`${COPY.titleFailedPrefix}${failure instanceof Error ? failure.message : String(failure)}`)
+      }
+      notify()
+    },
+    cancelTitleEditor() {
+      if (titleEditor === null) return
+      titleEditor = null
+      notify()
     },
     stop() {
       // Ctrl+C stops everything: the running turn AND anything still queued.
