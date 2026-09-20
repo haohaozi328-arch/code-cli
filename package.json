@@ -1,0 +1,29 @@
+{
+  "name": "dsh-code-cli",
+  "version": "0.1.0",
+  "description": "code —— deepseek dsh 终端 AI 编程助手的 npm 全局安装封装（code profile Ink TUI）",
+  "type": "module",
+  "bin": {
+    "code": "bin/code.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT",
+  "keywords": [
+    "deepseek",
+    "dsh",
+    "cli",
+    "tui",
+    "ai-agent",
+    "terminal"
+  ],
+  "files": [
+    "bin",
+    "vendor"
+  ],
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.3-alpha.2",
+    "@dsh-external/dsh-cli-app": "file:vendor/dsh-external-dsh-cli-app-0.0.0.tgz"
+  }
+}
