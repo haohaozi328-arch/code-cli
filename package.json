@@ -19,11 +19,14 @@
     "terminal"
   ],
   "files": [
-    "bin",
-    "vendor"
+    "bin"
   ],
   "dependencies": {
     "@deepseek-ai/dsh": "0.1.3-alpha.2",
-    "@dsh-external/dsh-cli-app": "file:vendor/dsh-external-dsh-cli-app-0.0.0.tgz"
-  }
+    "@dsh-external/dsh-cli-app": "*",
+    "js-yaml": "^4.1.0"
+  },
+  "bundleDependencies": [
+    "@dsh-external/dsh-cli-app"
+  ]
 }

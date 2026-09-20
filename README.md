@@ -44,7 +44,7 @@ npm uninstall -g dsh-code-cli
 | 部分 | 来源 |
 | --- | --- |
 | `bin/code.js` | 启动器：初始化 profile 并拉起 `dsh --profile code` |
-| `@deepseek-ai/dsh` | 官方 dsh 启动器（公开 npm 包，锁定 `0.1.6-alpha.2`） |
-| `vendor/dsh-external-dsh-cli-app-0.0.0.tgz` | 本仓库内置的 code TUI 前端包（Ink） |
+| `@deepseek-ai/dsh` | 官方 dsh 启动器（公开 npm 包，锁定 `0.1.3-alpha.2`） |
+| `node_modules/@dsh-external/dsh-cli-app` | 本仓库内置的 code TUI 前端包（Ink，bundleDependencies 随包分发） |
 
 协议：MIT

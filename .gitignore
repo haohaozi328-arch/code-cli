@@ -1,5 +1,6 @@
-node_modules/
+node_modules/*
+!node_modules/@dsh-external
+!node_modules/@dsh-external/**
 _build/
-_ref/
 *.log
 .DS_Store
