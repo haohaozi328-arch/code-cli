@@ -15,6 +15,11 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 // Empty type import carries the Context merge for the permission-presets service.
 import type {} from '@deepseek-ai/dsh-permission-presets'
 import type {} from '@deepseek-ai/dsh-settings'
+// Empty type import carries the Context merge for the commands registry (`ctx.commands`).
+import type {} from '@deepseek-ai/dsh-commands'
+// Runtime + type imports: the user-invocable policy check and the ctx merge (`ctx.skills`).
+import { isUserInvocable } from '@deepseek-ai/dsh-skill'
+import type {} from '@deepseek-ai/dsh-skill'
 // Empty type import carries the Context merge for the token-meter service.
 import type {} from '@deepseek-ai/dsh-token-meter'
 import { SessionSeq, type Session } from '@deepseek-ai/dsh-session'
@@ -290,6 +295,25 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       .catch((failure: unknown) => { setError(renderError(failure)) })
   }
 
+  /**
+   * Prompt half of send(): the running gate queues typed prompts FIFO; an
+   * idle agent receives the text directly. The skill-command route shares it
+   * so a recognized `/name` line queues exactly like plain prose.
+   * @param text - the original line as typed.
+   * @param trimmed - its trimmed form (queued and remembered).
+   */
+  const submitOrQueue = (text: string, trimmed: string): void => {
+    if (running) {
+      // opencode-style queue: a prompt typed while the agent runs drains
+      // FIFO when the current turn settles, instead of bouncing an error.
+      history.remember(trimmed)
+      setQueued([...queued, trimmed])
+      return
+    }
+    history.remember(trimmed)
+    submitPrompt(text)
+  }
+
   /** Validate and request a model-route switch; shared by /model and the picker. */
   const submitModelSpec = (spec: string): void => {
     const trimmed = spec.trim()
@@ -303,6 +327,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   const permissionService = ctx.get('permissionPresets')
   let permissionPolicy = lastApprovalPolicy(session)
   let permissionPreset = permissionService === undefined ? permissionPolicy : permissionService.current(session)
+  const skillRegistry = ctx.get('skills')
 
   const openModelPicker = (): void => {
     const currentProvider = agent.options.provider ?? 'deepseek-official'
@@ -356,6 +381,27 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     notify()
   }
 
+  /** Open the `/skills` list: the user-invocable skills this session's composition exposes. */
+  const openSkillPicker = (): void => {
+    if (skillRegistry === undefined) {
+      appendNotice(COPY.skillsUnavailable)
+      return
+    }
+    void skillRegistry.list({ cwd: session.header.cwd, scope: agent })
+      .then((skills) => {
+        const items: ChoiceItem[] = skills.filter(isUserInvocable).map(skill => ({
+          label: skill.description === '' ? skill.name : `${skill.name} — ${skill.description}`,
+          value: skill.name,
+        }))
+        if (items.length === 0) {
+          appendNotice(COPY.skillsUnavailable)
+          return
+        }
+        setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items })
+      })
+      .catch((failure: unknown) => { appendNotice(`${COPY.skillsFailedPrefix}${renderError(failure)}`) })
+  }
+
   const connect = new ConnectController(ctx, {
     fail: (message) => { setError(message) },
     notice: (text) => { appendNotice(text) },
@@ -397,10 +443,44 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   }
 
   /**
+   * Route one slash line the built-ins did not claim. A registered registry
+   * command wins the name (the same adjudication as the web client, where a
+   * shared name resolves to the command); otherwise a user-invocable skill
+   * makes the whole line a prompt — the host pre-step boundary
+   * (`dsh-tool-skill`) loads the named skill while the typed words ride as
+   * prompt text, queuing like prose while a turn runs. An unresolved name is
+   * an unknown-command hint; nothing falls through to the model silently.
+   * @param name - the first word, lower-cased, e.g. `/deploy-checks`.
+   * @param line - the complete trimmed line, sent verbatim on the skill route.
+   */
+  const routeSlashedLine = (name: string, line: string): void => {
+    const bare = name.slice(1)
+    const commands = ctx.get('commands')
+    if (commands !== undefined && commands.find(agent, bare) !== undefined) {
+      dispatchRegistryCommand(name, line)
+      return
+    }
+    if (skillRegistry === undefined) {
+      setError(`unknown command: ${name}; try /help`)
+      return
+    }
+    void skillRegistry.get(bare, { cwd: session.header.cwd, scope: agent })
+      .then((skill) => {
+        if (skill === undefined || !isUserInvocable(skill)) {
+          setError(`unknown command: ${name}; try /help`)
+          return
+        }
+        submitOrQueue(line, line)
+      })
+      .catch((failure: unknown) => { setError(renderError(failure)) })
+  }
+
+  /**
    * Route one slash command. The command name is the first word, lower-cased
    * (case- and whitespace-tolerant); the remaining text is its argument.
-   * Built-ins act locally; anything else goes to the registry commands service,
-   * and an unregistered name gets an unknown hint instead of reaching the model.
+   * Built-ins act locally; anything else goes to the slash fallback — registry
+   * commands first, then a user-invocable skill as a prompt — and an
+   * unresolved name gets an unknown hint instead of reaching the model.
    * @param line - the trimmed slash line, e.g. `/model deepseek-official/x`.
    */
   /**
@@ -445,6 +525,13 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         if (rest !== '') applyPolicy(rest)
         else openPolicyPicker()
         return
+      case '/skills':
+        // Bare /skills opens the skill choice list; an argument is not a
+        // filter — the picked skill lands in the composer as `/name ` and the
+        // user appends guidance before sending.
+        if (rest !== '') setError(COPY.skillsUsage)
+        else openSkillPicker()
+        return
       case '/connect':
         if (rest !== '') connect.start(rest)
         else connect.openPicker()
@@ -481,7 +568,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         setError(`unknown command: ${name}; try /help`)
         return
       default:
-        dispatchRegistryCommand(name, line)
+        routeSlashedLine(name, line)
     }
   }
 
@@ -671,15 +758,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         dispatchCommand(trimmed)
         return
       }
-      if (running) {
-        // opencode-style queue: a prompt typed while the agent runs drains
-        // FIFO when the current turn settles, instead of bouncing an error.
-        history.remember(trimmed)
-        setQueued([...queued, trimmed])
-        return
-      }
-      history.remember(trimmed)
-      submitPrompt(text)
+      submitOrQueue(text, trimmed)
     },
     historyOlder(current) {
       return history.step(1, current)
@@ -750,6 +829,13 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     pickPolicy(policy) {
       applyPolicy(policy)
     },
+    openSkillPicker,
+    pickSkill(name) {
+      // The picked name only seeds the composer (`/name `); send-time
+      // validation lives in the slash fallback's skill route.
+      void name
+      setChoicePicker(null)
+    },
     openConnectPicker() {
       connect.openPicker()
     },
@@ -801,6 +887,7 @@ export const COMMAND_HINTS: readonly CommandHint[] = [
   { name: '/perm', hint: 'Permission preset', arg: 'workspace-write|danger-full-access' },
   { name: '/connect', hint: 'Connect a model provider' },
   { name: '/title', hint: 'Rename this session', arg: 'text' },
+  { name: '/skills', hint: 'Pick and invoke a skill' },
   { name: '/goal', hint: 'Manage the session goal' },
   { name: '/plan', hint: 'Enter plan mode' },
   { name: '/clear', hint: 'Clear the current display' },

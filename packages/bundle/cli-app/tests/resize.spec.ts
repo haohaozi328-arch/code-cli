@@ -301,6 +301,8 @@ function viewModel(state: UiState): ViewModel {
     pickModel: noop,
     openPolicyPicker: noop,
     pickPolicy: noop,
+    openSkillPicker: noop,
+    pickSkill: noop,
     openConnectPicker: noop,
     pickConnectProvider: noop,
     submitConnectInput: noop,

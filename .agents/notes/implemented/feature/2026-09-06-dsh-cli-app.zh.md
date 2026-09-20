@@ -74,7 +74,7 @@ Status: implemented
 **真机状态**：M3 交互链路（工具卡片/审批弹窗）的实现与单测全绿；TTY 自动化通道无法传送 CR（write_stdin 将 `\r` 当字面文本），真机触发工具/审批需用户在终端手动敲一条越界指令验证（M2 真机已证主链路：send/流式/工具执行均正常）。
 
 ### 评审整改（M3 三审）
-- 注册表斜杠命令补齐：send() 对内置命令外的 `/xxx` 转 `ctx.commands.execute` （base command-* 行：/compact /feedback /goal /plan；执行不占模型轮次），未注册则 unknown 提示（不再当消息发给模型）；HELP 更新。
+- 注册表斜杠命令补齐：send() 对内置命令外的 `/xxx` 转 `ctx.commands.execute` （base command-* 行：/compact /feedback /goal /plan；执行不占模型轮次），未注册则 unknown 提示（不再当消息发给模型）；HELP 更新。（2026-09-20 修订：非注册表命令的斜杠行现在可先路由到已注册的用户可调用 skill，作为逐字提示词发送，落选才回退 unknown——见「/skills 调用」节。）
 - ApprovalBus 并发覆盖修复：第二个 pending 请求直接抛（ApprovalService 归一为 `unavailable`），首个 resolver 不再被替换悬空；新增并发单测。
 - tool-call-delta 参数流式推迟 M4（代码注释登记）；resume 后 tokens 从 0 计推迟 M5（README 登记）。
 - 未知 `/xxx` 行为变化：从「当消息发模型」改为 unknown 提示，对应测试同步。
@@ -190,6 +190,17 @@ opencode 对齐新增：
 
 用户要求在 todo 面板之外补一个独立的**任务进程时间看板**：`Ctrl+B` 在主界面与看板之间整屏切换（看板打开时吞掉其余按键）。看板只读 ViewModel 已投影的状态，与转录永不打架：任务清单（`todo/write` 投影，`[✓]/[•]/[ ]` 全量展示 + 完成计数）、当前回合（运行中给 spinner+实时用时+排队深度；空闲给上回合时长与结束时钟）、逐回合对话时间线（`turn/start`/`user/message`/`assistant/message`/`tool/call`/`turn/end` 折叠：每回合的时钟时段 + 你的提问 + 回复摘要 + 工具序列 + 输出 token，`#回合 HH:MM → HH:MM 时长`，新到旧，上限 12 条环形丢弃；resume 从 durable log 一次重建）、模型/权限/上下文环/用量读数，以及待审批警示（看板不会藏住一个等待确认的工具门）。实现：`ui/taskboard.tsx` 持有 `reduceTurnSpans/collectTurnSpans`（纯折叠，引用稳定）与 `isBoardToggle`（Ctrl+B 判定）；VM 增 `boardOpen/turnSpans` 状态与 `toggleBoard` 动作（replay 时从 durable log 一次折叠历史回合，live 路径吃 `session/event`）；App 顶层先处理切换再放行其余键位。初版 Ctrl+Alt 真机无响应（Windows Terminal 把 Alt+字母编成 `ESC 字母`，ink 的 keypress 解析器对该形态不置 meta，组合键永远到不了），改 Ctrl+B（普通控制字符，全终端可靠）；同轮把会话边界清屏升级为含 scrollback 的整屏擦除（`ESC[3J`），`/new` 等切换后上滑不再见旧对话，`/clear` 保持只清视口。`/help` 增补键位行。约定：测试不直接 import `.tsx`（宿主聚合工程的 TS6305 陷阱），一律走 `ui/index.ts` barrel。同日二次迭代（用户反馈「太简单」）：时间线升级为对话时间轴——`TurnEntry`（prompt/reply/tools/outputTokens）取代纯时长 `TurnSpan`，fold 吃 user/assistant/tool 事件（注入消息与空文本不产生条目、工具去重、prompt 取最新），VM 字段 `turnSpans`→`turnTimeline`。门禁：vitest 122/122、oxlint 0、tsc 0、typecheck 全仓绿、双 profile 启动冒烟通过。 同日第三次迭代（用户要求时间轴可拖动）：看板升级为双栏拖动——时间轴渲染为光标轴行（`●` 标记 live 回合、`❯` 标记选中回合），内容窗格显示选中回合的完整折叠对话（`TurnEntry` 增 `messages: TurnMessage[]` user/assistant/tool 逐条消息，每条至多渲染 8 行并给「还有」标记，每回合保留上限 40 条）；↑/↓ 逐回合移动、PgUp/PgDn 翻 5 条，越过最新回到 live。`stepTimelineCursor` 为纯光标函数；ink 的 `Key` 类型没有 home/end 旗标，因此只绑方向键与翻页键。门禁：vitest 125/125、oxlint 0、tsc 0、typecheck 全仓绿、test:docs 15/15、双 profile 启动冒烟通过（两个无关套件仅在全仓并行负载下抖动，隔离复跑通过）。 发布前用户真机复现空闲 OOM（约三分钟吃满 4GB 堆），根因在 ink 的 static 处理：关闭看板会卸载转录 `<Static>`，重挂后整份转录被当作全新 static 输出重渲染，ink 把它累积进常驻缓冲、并在任何达到屏幕高度的帧整体重放，写洪流让终端管道背压把未发字节堆上堆。现在 `<Static>` 常驻为 App 每个分支的首个子元素，看板自身钳制在终端高度之下（轴行与窗格消息按预算截取、窗格每行按显示宽度截断为单一物理行）。探针实测写洪流从 800 次开合 4.3GB 降到 2MB、15 秒 spinner 从 3.7GB 降到 3MB。门禁：vitest 126/126、oxlint 0、tsc 0、typecheck 全仓绿、test:docs 15/15、双 profile 启动冒烟通过。 同轮追加（用户选了翻页、历史与标题）：看板内容窗格支持翻页——`packPanePages` 把回合对话按窗格预算从新到旧打包成页，←/←→ 键走页（窗格渲染页码与「更晚」标记），切换回合落在新页。输入框用 ↑/↓ 回溯发过的提示词（`ui/history.ts`：进程级单一历史库，每会话用自己的持久化提示词播种、上限 100 条、回到 live 时还原草稿），`/title <text>` 走官方 `ctx.sessionTitle.rename` 缝重命名——VM 从持久化 `session/title` 事件重建状态栏标签（provider 生成的标题同样刷新），cli-app 补了 session-title 的工程引用，手动重命名钉住标题、自动生成不再覆盖；随后裸 `/title` 升级为行内编辑器（仿 /connect 向导）：`UiState.titleEditor` 携带当前持久化标题，共享输入缓冲喂字，Enter 经 `ctx.sessionTitle.rename` 提交、Esc 取消；`/title <text>` 仍可直接改名。门禁：vitest 139/139、oxlint 0、tsc 0、typecheck 全仓绿、双 profile 启动冒烟通过。 追加（用户觉得 /feedback 没用）：该命令已从终端界面移除——COMMAND_HINTS 与 /help 文本删去，输入 `/feedback ...` 改回 unknown 提示而不再执行，README 注册表清单同步移除。bundle 仍挂载插件包：直接删包会波及 base 清单、otel telemetry 依赖与官方组合文档，因此只摘除 CLI 界面。
 
+## /skills 调用（2026-09-20）
+
+用户要求在终端里实现 Claude Code / opencode 式 skills：输入 `/skills` 唤出技能清单，选中后 `/<名称> ` 落进输入框，界面等待用户补充指引，补完的行即调用该技能。
+
+- **宿主保留调用权，TUI 只暂存 token。** `ctx.commands`（cli-app patch 挂载的注册表）与 `ctx.skills`（base 挂载的 registry 与 filesystem provider）仍是两个权威；`/<名称> [指引]` 行先查**命令**（`commands.find`），再查**技能**：命中用户可调用项时把整行逐字作为用户消息发送——因为宿主的 pre-step 边界会识别已发消息中空白分隔的 `/<名称>` token 并注入渲染好的 `<skill_content>`（`dsh-tool-skill` 与 `renderSkillContent`），与 web 客户端的菜单选中、手输 token、ACP 提示完全同路。未知或仅模型可调用的名字仍回 unknown 提示；运行中输入按普通提示排队。在 TUI 内自行注入被否决：那会复制 `<skill_content>` 的规范形态并绕过 `skill` 工具的防重复加载规则。
+- **/skills 选择器**：对 `skillRegistry.list({cwd, scope: agent})` 以 `isUserInvocable` 过滤后开选择清单（异步；加载失败降级为提示行）。回车走 `pickSkill`（VM 侧仅关闭选择器），App 分支向输入框预填 `/<名称> `；发送时的合法性校验全部在斜杠回退的技能路由里。`/skills <参数>` 回用法错误；零个用户可调用技能时回不可用提示，而不是打开一个只会响应 Esc 的空选择器；registry 未挂载时同步回同一提示，因此无 registry 的 CommandRuntime 旧 bench 仍覆盖旧的 unknown 路径。
+- cli-app 的 tsconfig 补上 `interaction/commands` 与 `skill/skill` 工程引用；package.json 补对应 workspace 依赖。
+- 门禁：vitest 150/150（state.spec 新 `skill invocation` describe 与 app.spec 新 `App skill picker` describe）、oxlint 0、typecheck 全仓绿、全仓 lint 0。
+
 ## 工作副本 merge 提示
+
+- 2026-09-20 起 cli-app 的 tsconfig 又追加 `interaction/commands` 与 `skill/skill` 两个工程引用（merge 时同样手动保留）。
 
 merge upstream 时需手动保留：root `package.json` 的 devDeps、`tsconfig.base.json` 手写 alias 区、`tsconfig.host.json` 的 cli-app reference、`packages/bundle/cli-app/tsconfig.json` 里为 permission-presets / credentials / settings / brand / values / token-meter 补的项目引用，以及 `scripts/verify-package-readme-model-experience.ts` 中 cli-app 的间接条目。`packages/bundle/cli-app/` 与 `docs/cli-app/` 为新增未跟踪目录。

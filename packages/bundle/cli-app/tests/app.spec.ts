@@ -6,7 +6,7 @@
 
 import React from 'react'
 import { render } from 'ink-testing-library'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { App } from '../src/ui/index.ts'
 import { COPY } from '../src/ui/copy.ts'
@@ -63,6 +63,8 @@ function viewModel(state: UiState): ViewModel {
     pickModel: noop,
     openPolicyPicker: noop,
     pickPolicy: noop,
+    openSkillPicker: noop,
+    pickSkill: noop,
     openConnectPicker: noop,
     pickConnectProvider: noop,
     submitConnectInput: noop,
@@ -204,6 +206,55 @@ describe('App transcript', () => {
     const frame = instance.lastFrame() ?? ''
     expect(frame).toContain(COPY.queuedLabel)
     expect(frame).toContain('follow up later')
+    instance.unmount()
+  })
+})
+
+describe('App skill picker', () => {
+  /** One open `/skills` picker whose pick closes and notifies, so Enter drives the real App reducer. */
+  function skillPickerVm(): { vm: ViewModel; pickSkill: ReturnType<typeof vi.fn> } {
+    const listeners = new Set<() => void>()
+    let state = snapshot({
+      choicePicker: {
+        kind: 'skill',
+        title: COPY.choiceTitleSkills,
+        items: [{ label: 'deploy-checks — Deploy checks', value: 'deploy-checks' }],
+      },
+    })
+    const pickSkill = vi.fn(() => {
+      state = snapshot({})
+      for (const listener of [...listeners]) listener()
+    })
+    const base = viewModel(state)
+    return {
+      vm: {
+        ...base,
+        subscribe(listener: () => void) {
+          listeners.add(listener)
+          return () => { listeners.delete(listener) }
+        },
+        getState: () => state,
+        pickSkill,
+      },
+      pickSkill,
+    }
+  }
+
+  it('stages the picked `/name ` in the composer instead of sending, so guidance follows in the same draft', async () => {
+    const { vm, pickSkill } = skillPickerVm()
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm,
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    // Ink's useInput attaches in an effect; write keys only after it mounts.
+    await new Promise(resolve => setTimeout(resolve, 10))
+    instance.stdin.write('\r')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(pickSkill).toHaveBeenCalledWith('deploy-checks')
+    // The staged token sits at the prompt (the terminal trims the trailing space it ends with).
+    expect(instance.lastFrame() ?? '').toContain('❯ /deploy-checks')
     instance.unmount()
   })
 })

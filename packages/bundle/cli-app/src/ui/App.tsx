@@ -283,7 +283,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       }
       return
     }
-    // Priority 3: /model, /perm, and /connect choice lists.
+    // Priority 3: /model, /perm, /connect, and /skills choice lists.
     if (choicePicker !== null) {
       const count = choicePicker.items.length
       if (key.upArrow) {
@@ -300,20 +300,30 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
           switch (choicePicker.kind) {
             case 'model':
               vm.pickModel(item.value)
+              setInput('')
               break
             case 'policy':
               vm.pickPolicy(item.value)
+              setInput('')
               break
             case 'connect-provider':
               vm.pickConnectProvider(item.value)
+              setInput('')
               break
             case 'connect-api':
               vm.pickConnectApi(item.value)
+              setInput('')
+              break
+            case 'skill':
+              // Claude Code / opencode parity: the pick does not send; it
+              // stages `/name ` in the composer so guidance text follows in
+              // the same draft, and Enter then routes through the skill route.
+              vm.pickSkill(item.value)
+              setInput(`/${item.value} `)
               break
             default:
               assertNever(choicePicker.kind)
           }
-          setInput('')
         }
         return
       }

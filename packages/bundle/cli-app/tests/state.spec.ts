@@ -13,11 +13,15 @@ import type { Session, SessionEvent, UserMessage } from '@deepseek-ai/dsh-sessio
 import { LlmAttemptId, ToolCallId, createAssistantMessage, createToolResultMessage, createUserMessage } from '@deepseek-ai/dsh-llm'
 import type { ToolResultMessage } from '@deepseek-ai/dsh-llm'
 import CommandRuntime from '@deepseek-ai/dsh-commands'
+import type { CommandDefinition } from '@deepseek-ai/dsh-commands'
+import SkillRegistry from '@deepseek-ai/dsh-skill'
+import type { SkillRegistration } from '@deepseek-ai/dsh-skill'
 import { CompactionId } from '@deepseek-ai/dsh-compaction'
 import type { TokenMeter } from '@deepseek-ai/dsh-token-meter'
 import type { Agent, AssistantStreamFrame } from '@deepseek-ai/dsh-agent'
 import type { StreamChunk } from '@deepseek-ai/dsh-llm'
 import { createViewModel, createApprovalBus } from '../src/ui/state.ts'
+import { COPY } from '../src/ui/copy.ts'
 import type { ViewModel } from '../src/ui/model.ts'
 
 /** Scripted follow-up behavior: receives the sent message after send(). */
@@ -802,6 +806,143 @@ describe('createViewModel approval', () => {
     vm.send('/no-such-registry-command')
     await new Promise(resolve => setTimeout(resolve, 0))
     expect(vm.getState().error).toContain('unknown command')
+  })
+
+  describe('skill invocation', () => {
+    /** Runtime-skill row: kebab name plus a description, invocation policy optional (default: both). */
+    const skill = (name: string, description: string, invocation?: SkillRegistration['invocation']): SkillRegistration => ({
+      name,
+      description,
+      source: 'runtime',
+      content: `${name} body.`,
+      ...(invocation === undefined ? {} : { invocation }),
+    })
+
+    interface SkillBench {
+      ctx: Context
+      agent: Agent
+      vm: ViewModel
+      followup: ReturnType<typeof vi.fn>
+    }
+
+    /** Real SessionStore + CommandRuntime + SkillRegistry under one scripted agent. */
+    async function benchSkills(options: { skills?: SkillRegistration[]; commands?: CommandDefinition[] } = {}): Promise<SkillBench> {
+      const ctx = new Context()
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(CommandRuntime)
+      await ctx.plugin(SkillRegistry)
+      disposers.push(() => { void ctx.fiber.dispose() })
+      const session = ctx.sessions.create(SessionId(`vm-skills-${Math.random().toString(36).slice(2)}`))
+      const followup = vi.fn()
+      const agent = {
+        id: session.id, options: { provider: 'p', model: 'm' }, session, ctx,
+        status: 'idle', cancel: () => {}, followup,
+        whenIdle: () => Promise.resolve(),
+      } as unknown as Agent
+      const vm = createViewModel({ ctx, agent, session, sessionLabel: 'skills', catalog: [], approvalBus: createApprovalBus() })
+      register(vm)
+      for (const registration of options.skills ?? []) ctx.skills.register(registration)
+      for (const command of options.commands ?? []) ctx.commands.register(command)
+      return { ctx, agent, vm, followup }
+    }
+
+    it('opens the skill picker on a bare /skills, listing user-invocable skills only', async () => {
+      const { vm } = await benchSkills({
+        skills: [
+          skill('deploy-checks', 'Deploy checks'),
+          skill('user-macro', 'User macro', { modelInvocable: false, userInvocable: true }),
+          skill('model-internal', 'Model-only helper', { modelInvocable: true, userInvocable: false }),
+        ],
+      })
+      vm.send('/skills')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const picker = vm.getState().choicePicker
+      expect(picker).toMatchObject({ kind: 'skill', title: COPY.choiceTitleSkills })
+      expect(picker?.items.map(item => item.label)).toEqual([
+        'deploy-checks — Deploy checks',
+        'user-macro — User macro',
+      ])
+    })
+
+    it('reports the unavailable notice when no skill registry is mounted', async () => {
+      const { vm } = await bench()
+      vm.send('/skills')
+      expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'assistant', text: COPY.skillsUnavailable })
+      expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('reports the unavailable notice when nothing user-invocable is registered', async () => {
+      const { vm } = await benchSkills({ skills: [skill('model-internal', 'Model-only helper', { modelInvocable: true, userInvocable: false })] })
+      vm.send('/skills')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'assistant', text: COPY.skillsUnavailable })
+      expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('rejects /skills with an argument and closes the picker on pickSkill', async () => {
+      const { vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/skills deploy-checks')
+      expect(vm.getState().error).toBe(COPY.skillsUsage)
+      vm.send('/skills')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().choicePicker).not.toBeNull()
+      vm.pickSkill('deploy-checks')
+      expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('routes a skill line with guidance to the agent verbatim, not to the model-catalog tool', async () => {
+      const { vm, followup } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/deploy-checks ship it')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(followup).toHaveBeenCalledTimes(1)
+      expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([{ type: 'text', text: '/deploy-checks ship it' }])
+      expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'user', text: '/deploy-checks ship it' })
+    })
+
+    it('sends a bare skill token as its own prompt', async () => {
+      const { vm, followup } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/deploy-checks')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(followup).toHaveBeenCalledTimes(1)
+      expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([{ type: 'text', text: '/deploy-checks' }])
+    })
+
+    it('queues a skill line typed while the agent runs', async () => {
+      const { ctx, agent, vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('first prompt')
+      ctx.emit('agent/status', { agent, status: 'running' })
+      vm.send('/deploy-checks next')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().queued).toEqual(['/deploy-checks next'])
+    })
+
+    it('keeps the unknown-command hint for unknown names and model-only skills', async () => {
+      const { vm, followup } = await benchSkills({
+        skills: [skill('model-internal', 'Model-only helper', { modelInvocable: true, userInvocable: false })],
+      })
+      vm.send('/totally-unknown do x')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().error).toContain('unknown command')
+      vm.send('/model-internal hi')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().error).toContain('unknown command')
+      expect(followup).not.toHaveBeenCalled()
+    })
+
+    it('resolves a shared name to the registry command before the skill', async () => {
+      const { vm, followup } = await benchSkills({
+        skills: [skill('deploy-checks', 'Deploy checks')],
+        commands: [{
+          name: 'deploy-checks',
+          description: 'command twin',
+          handler: invocation => ({ kind: 'success', text: `ran:${invocation.rawInput.trim()}` }),
+        }],
+      })
+      vm.send('/deploy-checks go')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'assistant', text: 'ran:go' })
+      expect(followup).not.toHaveBeenCalled()
+    })
   })
 
   it('rejects a malformed /perm and answers never', async () => {

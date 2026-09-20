@@ -36,6 +36,11 @@ export const COPY = {
   choiceTitlePolicy: 'approval policy',
   choiceTitleConnectProvider: 'connect provider',
   choiceTitleConnectApi: 'connect api',
+  choiceTitleSkills: 'skills',
+
+  skillsUnavailable: '技能服务未挂载，无法列出技能',
+  skillsFailedPrefix: '/skills 失败：',
+  skillsUsage: '用法：/skills（打开技能列表）',
 
   policyAsk: 'ask — 每次敏感工具先询问',
   policyNever: 'never — 拒绝所有敏感工具',
@@ -129,6 +134,7 @@ export const HELP_TEXT: string = [
   '  /perm             设置权限预设（沙箱 + 审批）',
   '  /connect          连接模型商（主流 + 自定义）',
   '  /title            重命名当前会话',
+  '  /skills           选择并调用一个技能（skill）',
   '  /compact /goal /plan             上下文、目标与计划命令',
   '  /quit, /exit      退出会话（也可使用 Ctrl+D）',
   '  Ctrl+T            折叠或展开任务面板',

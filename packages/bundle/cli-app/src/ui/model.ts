@@ -76,9 +76,9 @@ export interface CommandHint {
 }
 
 /** The action confirming a choice list performs. */
-export type ChoicePickerKind = 'model' | 'policy' | 'connect-provider' | 'connect-api'
+export type ChoicePickerKind = 'model' | 'policy' | 'connect-provider' | 'connect-api' | 'skill'
 
-/** An open choice list (`/model`, `/perm`, `/connect`). */
+/** An open choice list (`/model`, `/perm`, `/connect`, `/skills`). */
 export interface ChoicePickerState {
   kind: ChoicePickerKind
   /** Heading the modal renders. */
@@ -245,6 +245,14 @@ export interface ViewModel {
   pickModel: (spec: string) => void
   /** Open the permission-preset choice picker. */
   openPolicyPicker: () => void
+  /** Open the `/skills` choice picker (user-invocable skills from `ctx.skills`). */
+  openSkillPicker: () => void
+  /**
+   * Confirm a skill choice and close the picker. The renderer prefills the
+   * composer with `/name ` so guidance text follows in the same draft; the
+   * send path re-validates the token through the skill-command route.
+   */
+  pickSkill: (name: string) => void
   /** Confirm a permission preset and apply both sandbox + approval controls. */
   pickPolicy: (policy: string) => void
   /** Open the provider `/connect` picker. */

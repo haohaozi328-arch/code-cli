@@ -38,6 +38,12 @@
       "path": "../../interaction/permission-presets"
     },
     {
+      "path": "../../interaction/commands"
+    },
+    {
+      "path": "../../skill/skill"
+    },
+    {
       "path": "../../credentials/credentials"
     },
     {
