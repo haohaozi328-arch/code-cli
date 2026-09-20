@@ -858,10 +858,8 @@ describe('createViewModel approval', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       const picker = vm.getState().choicePicker
       expect(picker).toMatchObject({ kind: 'skill', title: COPY.choiceTitleSkills })
-      expect(picker?.items.map(item => item.label)).toEqual([
-        'deploy-checks — Deploy checks',
-        'user-macro — User macro',
-      ])
+      expect(picker?.items.map(item => item.label)).toEqual(['/deploy-checks', '/user-macro'])
+      expect(picker?.items.map(item => item.description)).toEqual(['Deploy checks', 'User macro'])
     })
 
     it('reports the unavailable notice when no skill registry is mounted', async () => {

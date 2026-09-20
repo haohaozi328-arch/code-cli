@@ -66,6 +66,8 @@ export interface ConnectWizardState {
 export interface ChoiceItem {
   label: string
   value: string
+  /** Optional simple one-line summary, rendered dim after the label column. */
+  description?: string
 }
 
 /** One row of the slash-command palette. */

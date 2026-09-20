@@ -389,10 +389,12 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     }
     void skillRegistry.list({ cwd: session.header.cwd, scope: agent })
       .then((skills) => {
-        const items: ChoiceItem[] = skills.filter(isUserInvocable).map(skill => ({
-          label: skill.description === '' ? skill.name : `${skill.name} — ${skill.description}`,
-          value: skill.name,
-        }))
+        const items: ChoiceItem[] = skills.filter(isUserInvocable).map((skill) => {
+          // `/name` is the invocation shorthand the row advertises; the
+          // description is flattened so ChoiceList can keep it to one line.
+          const description = skill.description.replace(/\s+/g, ' ').trim()
+          return { label: `/${skill.name}`, value: skill.name, ...(description === '' ? {} : { description }) }
+        })
         if (items.length === 0) {
           appendNotice(COPY.skillsUnavailable)
           return

@@ -16,6 +16,9 @@ import type { ThemeTokens } from './theme.ts'
 /** Marker preceding the highlighted row of a list. */
 const SELECT_MARKER = '›'
 
+/** Cap the picker's label column so a long name cannot starve its description. */
+const MAX_CHOICE_LABEL_COLUMN = 24
+
 /** Rows a picker shows before it scrolls its viewport. */
 const SESSION_PICKER_ROWS = 5
 /** Rows a choice list shows before it scrolls its viewport. */
@@ -88,7 +91,7 @@ export function SessionPicker(props: {
   )
 }
 
-/** Generic bounded choice list used by `/model`, `/perm`, and `/connect`. */
+/** Generic bounded choice list used by `/model`, `/perm`, `/connect`, and `/skills`. */
 export function ChoiceList(props: {
   title: string
   items: readonly ChoiceItem[]
@@ -98,6 +101,8 @@ export function ChoiceList(props: {
   const { title, items, selected, theme } = props
   const start = windowStart(items.length, selected, CHOICE_PICKER_ROWS)
   const visible = items.slice(start, start + CHOICE_PICKER_ROWS)
+  const described = visible.filter(item => item.description !== undefined)
+  const labelWidth = described.length === 0 ? 0 : Math.min(MAX_CHOICE_LABEL_COLUMN, Math.max(...described.map(item => item.label.length)))
   return (
     <Box flexDirection="column" borderStyle="round" borderColor={theme.brand} marginBottom={1}>
       <Box marginLeft={1} marginTop={1}>
@@ -107,9 +112,12 @@ export function ChoiceList(props: {
       {items.length === 0 && <Text color={theme.muted} dimColor>  {COPY.choiceEmpty}</Text>}
       {visible.map((item, index) => {
         const actual = start + index
+        // One physical row per choice: the label, a column-aligned gap, then
+        // the simple description clipped at the terminal edge — long skill
+        // summaries never wrap into a dense wall of text.
         return (
-          <Text key={item.value} color={selected === actual ? theme.brand : theme.muted} bold={selected === actual}>
-            {selected === actual ? `${SELECT_MARKER} ` : '  '}{item.label}
+          <Text key={item.value} wrap="truncate-end" color={selected === actual ? theme.brand : theme.muted} bold={selected === actual}>
+            {selected === actual ? `${SELECT_MARKER} ` : '  '}{(item.description === undefined ? item.label : item.label.padEnd(labelWidth))}{item.description !== undefined && <Text dimColor>{'  '}{item.description}</Text>}
           </Text>
         )
       })}

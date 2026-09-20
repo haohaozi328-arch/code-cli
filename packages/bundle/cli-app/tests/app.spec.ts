@@ -218,7 +218,7 @@ describe('App skill picker', () => {
       choicePicker: {
         kind: 'skill',
         title: COPY.choiceTitleSkills,
-        items: [{ label: 'deploy-checks — Deploy checks', value: 'deploy-checks' }],
+        items: [{ label: '/deploy-checks', value: 'deploy-checks', description: 'Deploy checks' }],
       },
     })
     const pickSkill = vi.fn(() => {
@@ -255,6 +255,26 @@ describe('App skill picker', () => {
     expect(pickSkill).toHaveBeenCalledWith('deploy-checks')
     // The staged token sits at the prompt (the terminal trims the trailing space it ends with).
     expect(instance.lastFrame() ?? '').toContain('❯ /deploy-checks')
+    instance.unmount()
+  })
+
+  it('renders one-line `/name` rows: a padded name column, a gap, then the simple description', async () => {
+    const { vm } = skillPickerVm()
+    const instance = render(React.createElement(App, {
+      key: 's-2',
+      vm,
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const frame = (instance.lastFrame() ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+    const row = frame.split('\n').find(line => line.includes('/deploy-checks'))
+    expect(row).toBeDefined()
+    // The description shares the row (never wraps to a second line)…
+    expect(row).toContain('Deploy checks')
+    expect(frame.split('\n').filter(line => line.includes('Deploy checks'))).toHaveLength(1)
+    // …and the name column keeps at least a two-column gap before it.
+    expect(row).toMatch(/\/deploy-checks {2,}/)
     instance.unmount()
   })
 })
