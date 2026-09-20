@@ -97,8 +97,10 @@ export function ChoiceList(props: {
   items: readonly ChoiceItem[]
   selected: number
   theme: ThemeTokens
+  /** Placeholder shown while the item list is still loading. */
+  note: string | undefined
 }): React.JSX.Element {
-  const { title, items, selected, theme } = props
+  const { title, items, selected, theme, note } = props
   const start = windowStart(items.length, selected, CHOICE_PICKER_ROWS)
   const visible = items.slice(start, start + CHOICE_PICKER_ROWS)
   const described = visible.filter(item => item.description !== undefined)
@@ -109,7 +111,7 @@ export function ChoiceList(props: {
         <Text color={theme.brand} bold>{title}</Text>
         <Text color={theme.muted}>  ·  {COPY.choiceHint}</Text>
       </Box>
-      {items.length === 0 && <Text color={theme.muted} dimColor>  {COPY.choiceEmpty}</Text>}
+      {items.length === 0 && <Text color={theme.muted} dimColor>  {note ?? COPY.choiceEmpty}</Text>}
       {visible.map((item, index) => {
         const actual = start + index
         // One physical row per choice: the label, a column-aligned gap, then

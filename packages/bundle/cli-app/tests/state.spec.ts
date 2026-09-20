@@ -862,6 +862,26 @@ describe('createViewModel approval', () => {
       expect(picker?.items.map(item => item.description)).toEqual(['Deploy checks', 'User macro'])
     })
 
+    it('opens a loading placeholder immediately, then swaps in the catalog', async () => {
+      const { vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/skills')
+      // The catalog scans asynchronously; the frame must already be live so
+      // Esc stays effective while the provider is still working.
+      expect(vm.getState().choicePicker).toMatchObject({ kind: 'skill', title: COPY.choiceTitleSkills, items: [], note: COPY.skillLoading })
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().choicePicker?.items.map(item => item.label)).toEqual(['/deploy-checks'])
+    })
+
+    it('retires a late catalog that lands after the picker was dismissed', async () => {
+      const { vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/skills')
+      vm.closeChoicePicker()
+      await new Promise(resolve => setTimeout(resolve, 0))
+      // The asynchronous list resolved after the user left: it must not reopen.
+      expect(vm.getState().choicePicker).toBeNull()
+      expect(vm.getState().messages.at(-1)?.text).not.toBe(COPY.skillsUnavailable)
+    })
+
     it('reports the unavailable notice when no skill registry is mounted', async () => {
       const { vm } = await bench()
       vm.send('/skills')

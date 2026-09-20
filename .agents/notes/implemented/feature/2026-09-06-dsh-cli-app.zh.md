@@ -197,6 +197,7 @@ opencode 对齐新增：
 - **宿主保留调用权，TUI 只暂存 token。** `ctx.commands`（cli-app patch 挂载的注册表）与 `ctx.skills`（base 挂载的 registry 与 filesystem provider）仍是两个权威；`/<名称> [指引]` 行先查**命令**（`commands.find`），再查**技能**：命中用户可调用项时把整行逐字作为用户消息发送——因为宿主的 pre-step 边界会识别已发消息中空白分隔的 `/<名称>` token 并注入渲染好的 `<skill_content>`（`dsh-tool-skill` 与 `renderSkillContent`），与 web 客户端的菜单选中、手输 token、ACP 提示完全同路。未知或仅模型可调用的名字仍回 unknown 提示；运行中输入按普通提示排队。在 TUI 内自行注入被否决：那会复制 `<skill_content>` 的规范形态并绕过 `skill` 工具的防重复加载规则。
 - **/skills 选择器**：对 `skillRegistry.list({cwd, scope: agent})` 以 `isUserInvocable` 过滤后开选择清单（异步；加载失败降级为提示行）。回车走 `pickSkill`（VM 侧仅关闭选择器），App 分支向输入框预填 `/<名称> `；发送时的合法性校验全部在斜杠回退的技能路由里。`/skills <参数>` 回用法错误；零个用户可调用技能时回不可用提示，而不是打开一个只会响应 Esc 的空选择器；registry 未挂载时同步回同一提示，因此无 registry 的 CommandRuntime 旧 bench 仍覆盖旧的 unknown 路径。同日密集度整改后行渲染为单行：`ChoiceItem` 增可选 `description` 字段，行显示调用简写 `/<名称>`，简短功能描述经 `truncate-end` 在终端边缘截断（名称列补齐、上限 24 列），长描述绝不折行成密集文字墙。
 - cli-app 的 tsconfig 补上 `interaction/commands` 与 `skill/skill` 工程引用；package.json 补对应 workspace 依赖。
+- 同日可靠性整改（用户真机遇到 Esc 卡死）：目录扫描是异步的，`/skills` 现在 dispatch 瞬间同步打开加载框（`ChoicePickerState.note` 占位文案），且 `setChoicePicker` 每次写入都递增 `choiceEpoch`——用户已离开（Esc 或开了别的选择器）后晚到的列表结果无法再重开已关闭的选择器；Esc 还会顺手清掉等待期间漏进输入框的字节。
 - 门禁：vitest 150/150（state.spec 新 `skill invocation` describe 与 app.spec 新 `App skill picker` describe）、oxlint 0、typecheck 全仓绿、全仓 lint 0。
 
 ## 工作副本 merge 提示

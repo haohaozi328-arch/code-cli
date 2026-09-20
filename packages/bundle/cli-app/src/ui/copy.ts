@@ -41,6 +41,7 @@ export const COPY = {
   skillsUnavailable: '技能服务未挂载，无法列出技能',
   skillsFailedPrefix: '/skills 失败：',
   skillsUsage: '用法：/skills（打开技能列表）',
+  skillLoading: '扫描技能列表…',
 
   policyAsk: 'ask — 每次敏感工具先询问',
   policyNever: 'never — 拒绝所有敏感工具',

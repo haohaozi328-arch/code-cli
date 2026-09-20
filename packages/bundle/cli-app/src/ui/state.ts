@@ -121,6 +121,10 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   let error: string | null = null
   let pickerOpen = false
   let choicePicker: ChoicePickerState | null = null
+  // Bumped on every picker write; async openers (e.g. the `/skills` catalog
+  // scan) compare it to retire a result that lands after the picker was
+  // already dismissed or replaced.
+  let choiceEpoch = 0
   // The /title editor: open captures the session's current durable title.
   let titleEditor: string | null = null
   let pendingApproval: ApprovalPrompt | null = null
@@ -224,6 +228,7 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
   const setChoicePicker = (value: ChoicePickerState | null): void => {
     if (choicePicker === value) return
     choicePicker = value
+    choiceEpoch += 1
     notify()
   }
   const setTokens = (usage: { input: number; output: number; reasoning?: number }): void => {
@@ -387,8 +392,14 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       appendNotice(COPY.skillsUnavailable)
       return
     }
+    // The catalog scan is asynchronous: open the frame immediately so Esc
+    // stays live while the provider works, and let the epoch retire a late
+    // response landing after the user already left (or opened another picker).
+    setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items: [], note: COPY.skillLoading })
+    const loadEpoch = choiceEpoch
     void skillRegistry.list({ cwd: session.header.cwd, scope: agent })
       .then((skills) => {
+        if (choiceEpoch !== loadEpoch) return
         const items: ChoiceItem[] = skills.filter(isUserInvocable).map((skill) => {
           // `/name` is the invocation shorthand the row advertises; the
           // description is flattened so ChoiceList can keep it to one line.
@@ -396,12 +407,17 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           return { label: `/${skill.name}`, value: skill.name, ...(description === '' ? {} : { description }) }
         })
         if (items.length === 0) {
+          setChoicePicker(null)
           appendNotice(COPY.skillsUnavailable)
           return
         }
         setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items })
       })
-      .catch((failure: unknown) => { appendNotice(`${COPY.skillsFailedPrefix}${renderError(failure)}`) })
+      .catch((failure: unknown) => {
+        if (choiceEpoch !== loadEpoch) return
+        setChoicePicker(null)
+        appendNotice(`${COPY.skillsFailedPrefix}${renderError(failure)}`)
+      })
   }
 
   const connect = new ConnectController(ctx, {

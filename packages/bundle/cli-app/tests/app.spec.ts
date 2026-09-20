@@ -277,4 +277,40 @@ describe('App skill picker', () => {
     expect(row).toMatch(/\/deploy-checks {2,}/)
     instance.unmount()
   })
+
+  it('Esc closes the picker and hands the keyboard back to the composer', async () => {
+    const listeners = new Set<() => void>()
+    let state = snapshot({
+      choicePicker: {
+        kind: 'skill',
+        title: COPY.choiceTitleSkills,
+        items: [{ label: '/deploy-checks', value: 'deploy-checks', description: 'Deploy checks' }],
+      },
+    })
+    const closeChoicePicker = vi.fn(() => {
+      state = snapshot({})
+      for (const listener of [...listeners]) listener()
+    })
+    const base = viewModel(state)
+    const vm: ViewModel = {
+      ...base,
+      subscribe(listener: () => void) {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      getState: () => state,
+      closeChoicePicker,
+    }
+    const instance = render(React.createElement(App, { key: 's-3', vm, theme: THEMES['deep-forest'], ui: 'classic' }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    instance.stdin.write('\x1b')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(closeChoicePicker).toHaveBeenCalledTimes(1)
+    // The picker frame is gone and plain typing reaches the composer again.
+    expect(instance.lastFrame() ?? '').not.toContain(COPY.choiceTitleSkills)
+    instance.stdin.write('a')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    expect(instance.lastFrame() ?? '').toContain('❯ a')
+    instance.unmount()
+  })
 })

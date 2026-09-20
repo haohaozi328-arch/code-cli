@@ -328,7 +328,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
         return
       }
       if (key.escape || (key.ctrl && lower === 'c')) {
+        // Cancel also clears whatever trickled into the buffer while the async
+        // `/skills` catalog was still loading.
         vm.closeChoicePicker()
+        setInput('')
         return
       }
       return
@@ -490,7 +493,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       {connectWizard !== null && <ConnectPrompt wizard={connectWizard} theme={theme} />}
       {titleEditor !== null && <TitlePrompt current={titleEditor} theme={theme} />}
       {choicePicker !== null && (
-        <ChoiceList title={choicePicker.title} items={choicePicker.items} selected={effectiveChoiceIndex} theme={theme} />
+        <ChoiceList
+          title={choicePicker.title} items={choicePicker.items}
+          selected={effectiveChoiceIndex} theme={theme} note={choicePicker.note}
+        />
       )}
       {commandMenuOpen && <CommandMenu matches={commandMatches} selected={effectiveCommandIndex} theme={theme} />}
     </>

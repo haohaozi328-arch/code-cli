@@ -86,6 +86,8 @@ export interface ChoicePickerState {
   /** Heading the modal renders. */
   title: string
   items: ChoiceItem[]
+  /** Placeholder line while the item list is still loading (empty `items`). */
+  note?: string
 }
 
 /** Context-window occupancy rendered by the composer's context ring. */
