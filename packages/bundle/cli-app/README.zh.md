@@ -44,7 +44,7 @@ dsh --profile cli --ui opencode         # switch the layout for one run
 - 全生命周期工具卡片：流式参数预览、折叠结果、running→done/error 状态与图标。
 - 审批提示（`[a] allow once · [r] reject · [esc] cancel`），自 agent scope 桥接，配 `/perm` 预设。
 - 会话面：`/new`、`/fork`、覆盖最近 50 条持久化会话的 `/sessions` 选择器，以及由真实模型目录驱动的 `/model` 选择器（切换即 fork 会话并保留历史）。
-- 技能调用（Claude Code / opencode 式）：`/skills` 弹出本会话用户可调用技能的选择器，每行一行：`/<名称>` 调用简写配简短功能描述（终端边缘截断、绝不折行）；回车把 `/<名称> ` 暂存进输入框等待补充指引，`/<名称> [指引]` 原样发送，由宿主 skill 边界为该步注入该技能的 `<skill_content>`——同名命令优先，未知或仅模型可调用的名字仍回 unknown 提示。
+- 技能调用（Claude Code / opencode 式）：`/skills` 弹出本会话用户可调用技能的选择器，每行一行：`/<名称>` 调用简写配简短功能描述（终端边缘截断、绝不折行）；输入即筛选、页脚回显关键词；回车把 `/<名称> ` 暂存进输入框等待补充指引，`/<名称> [指引]` 原样发送，由宿主 skill 边界为该步注入该技能的 `<skill_content>`——同名命令优先，未知或仅模型可调用的名字仍回 unknown 提示。
 - 任务面板，投影 agent 的 `todo_write` 清单（`[✓]/[•]/[ ]`、`Ctrl+T` 折叠、resume/fork 后从 log 重建）。
 - 带计量的状态行：`token 42.5/s` 吞吐、累计用量，以及压缩落地即时降档的上下文占用环。
 - agent 运行时的盲文 spinner 与已用时间；运行中输入的普通提示按 FIFO 排队，空闲沿逐条发送（斜杠命令不受限）。

@@ -99,8 +99,10 @@ export function ChoiceList(props: {
   theme: ThemeTokens
   /** Placeholder shown while the item list is still loading. */
   note: string | undefined
+  /** Live filter text owned by the App; drives the footer and the empty row. */
+  search: string
 }): React.JSX.Element {
-  const { title, items, selected, theme, note } = props
+  const { title, items, selected, theme, note, search } = props
   const start = windowStart(items.length, selected, CHOICE_PICKER_ROWS)
   const visible = items.slice(start, start + CHOICE_PICKER_ROWS)
   const described = visible.filter(item => item.description !== undefined)
@@ -111,7 +113,7 @@ export function ChoiceList(props: {
         <Text color={theme.brand} bold>{title}</Text>
         <Text color={theme.muted}>  ·  {COPY.choiceHint}</Text>
       </Box>
-      {items.length === 0 && <Text color={theme.muted} dimColor>  {note ?? COPY.choiceEmpty}</Text>}
+      {items.length === 0 && <Text color={theme.muted} dimColor>  {note ?? (search === '' ? COPY.choiceEmpty : COPY.choiceSearchEmpty)}</Text>}
       {visible.map((item, index) => {
         const actual = start + index
         // One physical row per choice: the label, a column-aligned gap, then
@@ -123,9 +125,9 @@ export function ChoiceList(props: {
           </Text>
         )
       })}
-      {items.length > CHOICE_PICKER_ROWS && (
+      {(items.length > CHOICE_PICKER_ROWS || search !== '') && (
         <Text color={theme.muted} dimColor>
-          {'  '}{start + 1}-{Math.min(start + CHOICE_PICKER_ROWS, items.length)} / {items.length}
+          {'  '}{items.length === 0 ? 0 : start + 1}-{Math.min(start + CHOICE_PICKER_ROWS, items.length)} / {items.length}{'  ·  '}{search === '' ? COPY.choiceSearchNote : `${COPY.choiceFilterPrefix}${search}`}
         </Text>
       )}
     </Box>

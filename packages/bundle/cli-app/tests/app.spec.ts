@@ -313,4 +313,44 @@ describe('App skill picker', () => {
     expect(instance.lastFrame() ?? '').toContain('❯ a')
     instance.unmount()
   })
+
+  it('narrows the rows as you type and Backspace restores them, with a footer echo', async () => {
+    const listeners = new Set<() => void>()
+    const state = snapshot({
+      choicePicker: {
+        kind: 'skill',
+        title: COPY.choiceTitleSkills,
+        items: [
+          { label: '/deploy-checks', value: 'deploy-checks', description: 'Deploy checks' },
+          { label: '/lint-docs', value: 'lint-docs', description: 'Lint docs' },
+        ],
+      },
+    })
+    const base = viewModel(state)
+    const vm: ViewModel = {
+      ...base,
+      subscribe(listener: () => void) {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      getState: () => state,
+    }
+    const instance = render(React.createElement(App, { key: 's-4', vm, theme: THEMES['deep-forest'], ui: 'classic' }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    instance.stdin.write('dep')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const strip = (text: string): string => text.replace(/\x1b\[[0-9;]*m/g, '')
+    let frame = strip(instance.lastFrame() ?? '')
+    expect(frame).toContain('/deploy-checks')
+    expect(frame).not.toContain('/lint-docs')
+    expect(frame).toContain(`${COPY.choiceFilterPrefix}dep`)
+    // Backspace over the whole query restores every row.
+    instance.stdin.write('\x7f')
+    instance.stdin.write('\x7f')
+    instance.stdin.write('\x7f')
+    await new Promise(resolve => setTimeout(resolve, 10))
+    frame = strip(instance.lastFrame() ?? '')
+    expect(frame).toContain('/lint-docs')
+    instance.unmount()
+  })
 })

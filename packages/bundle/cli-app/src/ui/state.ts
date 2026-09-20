@@ -898,16 +898,16 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
  * router cannot drift. `arg` renders as a usage hint after the name.
  */
 export const COMMAND_HINTS: readonly CommandHint[] = [
-  { name: '/new', hint: 'Create a new session' },
-  { name: '/fork', hint: 'Create a fork from the current session' },
-  { name: '/sessions', hint: 'Choose a saved session' },
-  { name: '/model', hint: 'Switch model', arg: 'provider/model' },
-  { name: '/perm', hint: 'Permission preset', arg: 'workspace-write|danger-full-access' },
-  { name: '/connect', hint: 'Connect a model provider' },
-  { name: '/title', hint: 'Rename this session', arg: 'text' },
-  { name: '/skills', hint: 'Pick and invoke a skill' },
-  { name: '/goal', hint: 'Manage the session goal' },
-  { name: '/plan', hint: 'Enter plan mode' },
-  { name: '/clear', hint: 'Clear the current display' },
-  { name: '/quit', hint: 'Exit the application', arg: 'also /exit' },
+  { name: '/new', hint: '新建会话' },
+  { name: '/fork', hint: '从当前会话创建分支' },
+  { name: '/sessions', hint: '选择已保存的会话' },
+  { name: '/model', hint: '切换模型', arg: 'provider/model' },
+  { name: '/perm', hint: '权限预设', arg: 'workspace-write|danger-full-access' },
+  { name: '/connect', hint: '连接模型提供方' },
+  { name: '/title', hint: '重命名会话', arg: 'text' },
+  { name: '/skills', hint: '选择并调用技能' },
+  { name: '/goal', hint: '管理会话目标' },
+  { name: '/plan', hint: '进入计划模式' },
+  { name: '/clear', hint: '清空当前显示' },
+  { name: '/quit', hint: '退出应用', arg: '或 /exit' },
 ]

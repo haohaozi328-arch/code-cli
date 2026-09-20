@@ -146,6 +146,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const [sessionSearch, setSessionSearch] = useState('')
   const [commandIndex, setCommandIndex] = useState(0)
   const [choiceIndex, setChoiceIndex] = useState(0)
+  // Type-to-filter buffer for the choice picker (the sessions modal shares
+  // the same interaction; the composer itself stays closed while it is open).
+  const [choiceSearch, setChoiceSearch] = useState('')
   // Key of the assistant row whose reasoning is expanded (default collapsed).
   const [expandedReasoning, setExpandedReasoning] = useState<string | null>(null)
   // Ctrl+T fold for the agent task panel.
@@ -186,7 +189,16 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   )
   const commandMenuOpen = commandQuery !== null && commandMatches.length > 0
   const effectiveCommandIndex = clampIndex(commandIndex, commandMatches.length)
-  const effectiveChoiceIndex = choicePicker === null ? 0 : clampIndex(choiceIndex, choicePicker.items.length)
+  // Type-to-filter over the choice list: `/skills` rows narrow on the label
+  // or the description, mirroring how the sessions modal filters its rows.
+  const filteredChoices = useMemo(() => {
+    if (choicePicker === null) return []
+    const query = choiceSearch.trim().toLowerCase()
+    if (query === '') return choicePicker.items
+    return choicePicker.items.filter(item =>
+      item.label.toLowerCase().includes(query) || (item.description?.toLowerCase().includes(query) ?? false))
+  }, [choicePicker, choiceSearch])
+  const effectiveChoiceIndex = filteredChoices.length === 0 ? 0 : clampIndex(choiceIndex, filteredChoices.length)
 
   // A picker opening always starts at the newest row; the index never outlives
   // its catalog snapshot.
@@ -196,8 +208,15 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       setSessionSearch('')
     }
   }, [pickerOpen])
+  const choicePickerWasNull = useRef(true)
   useEffect(() => {
-    if (choicePicker !== null) setChoiceIndex(0)
+    // Reset the cursor and the search buffer only on a fresh open, never when
+    // an async catalog swap replaces the placeholder with the real list.
+    if (choicePicker !== null && choicePickerWasNull.current) {
+      setChoiceIndex(0)
+      setChoiceSearch('')
+    }
+    choicePickerWasNull.current = choicePicker === null
   }, [choicePicker])
   // Opening the board always lands on the live turn.
   useEffect(() => {
@@ -285,7 +304,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     }
     // Priority 3: /model, /perm, /connect, and /skills choice lists.
     if (choicePicker !== null) {
-      const count = choicePicker.items.length
+      const count = filteredChoices.length
       if (key.upArrow) {
         setChoiceIndex(prev => (count === 0 ? 0 : (prev - 1 + count) % count))
         return
@@ -295,7 +314,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
         return
       }
       if (key.return) {
-        const item = choicePicker.items[effectiveChoiceIndex]
+        const item = filteredChoices[effectiveChoiceIndex]
         if (item !== undefined) {
           switch (choicePicker.kind) {
             case 'model':
@@ -333,6 +352,17 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
         vm.closeChoicePicker()
         setInput('')
         return
+      }
+      if (key.backspace || key.delete) {
+        setChoiceSearch(prev => prev.slice(0, -1))
+        setChoiceIndex(0)
+        return
+      }
+      // Typing narrows the list in place; the composer stays closed until a
+      // pick lands or Esc leaves.
+      if (chunk !== '' && !key.ctrl && !key.meta) {
+        setChoiceSearch(prev => prev + chunk)
+        setChoiceIndex(0)
       }
       return
     }
@@ -494,8 +524,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       {titleEditor !== null && <TitlePrompt current={titleEditor} theme={theme} />}
       {choicePicker !== null && (
         <ChoiceList
-          title={choicePicker.title} items={choicePicker.items}
+          title={choicePicker.title} items={filteredChoices}
           selected={effectiveChoiceIndex} theme={theme} note={choicePicker.note}
+          search={choiceSearch}
         />
       )}
       {commandMenuOpen && <CommandMenu matches={commandMatches} selected={effectiveCommandIndex} theme={theme} />}

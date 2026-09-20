@@ -198,6 +198,7 @@ opencode 对齐新增：
 - **/skills 选择器**：对 `skillRegistry.list({cwd, scope: agent})` 以 `isUserInvocable` 过滤后开选择清单（异步；加载失败降级为提示行）。回车走 `pickSkill`（VM 侧仅关闭选择器），App 分支向输入框预填 `/<名称> `；发送时的合法性校验全部在斜杠回退的技能路由里。`/skills <参数>` 回用法错误；零个用户可调用技能时回不可用提示，而不是打开一个只会响应 Esc 的空选择器；registry 未挂载时同步回同一提示，因此无 registry 的 CommandRuntime 旧 bench 仍覆盖旧的 unknown 路径。同日密集度整改后行渲染为单行：`ChoiceItem` 增可选 `description` 字段，行显示调用简写 `/<名称>`，简短功能描述经 `truncate-end` 在终端边缘截断（名称列补齐、上限 24 列），长描述绝不折行成密集文字墙。
 - cli-app 的 tsconfig 补上 `interaction/commands` 与 `skill/skill` 工程引用；package.json 补对应 workspace 依赖。
 - 同日可靠性整改（用户真机遇到 Esc 卡死）：目录扫描是异步的，`/skills` 现在 dispatch 瞬间同步打开加载框（`ChoicePickerState.note` 占位文案），且 `setChoicePicker` 每次写入都递增 `choiceEpoch`——用户已离开（Esc 或开了别的选择器）后晚到的列表结果无法再重开已关闭的选择器；Esc 还会顺手清掉等待期间漏进输入框的字节。
+- 同日跟进（按用户要求）：斜杠菜单全部描述中文化（`COMMAND_HINTS`），选择器新增输入即筛选——`choiceSearch`（App 本地状态）按名称列与描述过滤行，Backspace 回删关键词，页脚回显 `筛选：<关键词>`，空结果显示「无匹配项」；光标与搜索词的重置只在全新打开时触发，异步目录到达不会丢失正在输入的关键词。门禁：vitest 155/155。
 - 门禁：vitest 150/150（state.spec 新 `skill invocation` describe 与 app.spec 新 `App skill picker` describe）、oxlint 0、typecheck 全仓绿、全仓 lint 0。
 
 ## 工作副本 merge 提示

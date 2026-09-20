@@ -32,6 +32,9 @@ export const COPY = {
 
   choiceHint: '↑↓ 选择 · Enter 确认 · Esc 返回',
   choiceEmpty: '暂无可选项',
+  choiceSearchNote: '输入以筛选',
+  choiceFilterPrefix: '筛选：',
+  choiceSearchEmpty: '无匹配项',
   choiceTitleModel: 'model',
   choiceTitlePolicy: 'approval policy',
   choiceTitleConnectProvider: 'connect provider',
