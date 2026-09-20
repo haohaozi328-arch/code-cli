@@ -13,7 +13,10 @@
 npm install -g github:haohaozi328-arch/code-cli
 ```
 
-要求 Node.js >= 20。
+要求 Node.js >= 20。npm >= 11 默认禁止依赖的安装脚本，如需 node-pty 等原生模块
+（终端面板功能依赖它），首次安装请追加
+`--allow-scripts=node-pty,fs-ext,koffi,@deepseek-ai/dsh-subprocess-local`；
+不追加也不影响对话功能。
 
 > 提示：`code` 命令与 VS Code 自带的 `code` 命令同名。两者谁先生效取决于
 > PATH 顺序；如需避免冲突，可卸载本包或为 VS Code 的命令另设别名。
@@ -43,8 +46,8 @@ npm uninstall -g dsh-code-cli
 
 | 部分 | 来源 |
 | --- | --- |
-| `bin/code.js` | 启动器：初始化 profile 并拉起 `dsh --profile code` |
+| `bin/code.js` | 启动器：释放内置前端、初始化 profile，并拉起 `dsh --profile code` |
 | `@deepseek-ai/dsh` | 官方 dsh 启动器（公开 npm 包，锁定 `0.1.3-alpha.2`） |
-| `node_modules/@dsh-external/dsh-cli-app` | 本仓库内置的 code TUI 前端包（Ink，bundleDependencies 随包分发） |
+| `vendor/dsh-cli-app/` | 本仓库内置的 code TUI 前端包（Ink），首次启动 `code` 时自动释放到包内 node_modules |
 
 协议：MIT

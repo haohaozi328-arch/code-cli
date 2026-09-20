@@ -9,18 +9,23 @@
 monorepo (D:\workspace\DeepSeek\dsh-cli)
   ├─ pnpm build:lib:host           → packages/bundle/cli-app/lib/（tsdown bundle）
   ├─ pnpm --filter @dsh-external/dsh-cli-app pack → 生成 tgz（workspace:* 已替换为版本号）
-  └─ tar 解包 → 本仓 node_modules/@dsh-external/dsh-cli-app（bundleDependencies 内嵌分发）
+  └─ tar 解包 → 本仓 vendor/dsh-cli-app（随仓分发）
 
 github:haohaozi328-arch/code-cli（本仓）
-  ├─ bin/code.js        全局命令入口：确保 $DSH_HOME/profiles/code 存在 → spawn dsh --profile code
-  ├─ package.json       dependencies: @deepseek-ai/dsh（精确版本）+ cli-app（file:vendor tgz）
-  └─ node_modules/@dsh-external/dsh-cli-app  内置 TUI 前端包（含全部 fork 本地 UI 修改）
+  ├─ bin/code.js        全局命令入口：释放 vendor 前端 → 确保 $DSH_HOME/profiles/code 存在 → spawn dsh --profile code
+  ├─ package.json       dependencies: @deepseek-ai/dsh（精确版本）+ ink/react/zod 等前端运行时
+  └─ vendor/dsh-cli-app/  内置 TUI 前端包（含全部 fork 本地 UI 修改），bin/code.js 首启时释放为
+                          node_modules/@dsh-external/dsh-cli-app
 ```
 
 安装链路：`npm i -g github:...` → clone 本仓 → npm 从公开 registry 拉
-`@deepseek-ai/*` 依赖树，并直接使用本仓内嵌的 `@dsh-external/dsh-cli-app`（bundleDependencies 分发，无需 file: 解析）。
-`dsh-base` 等 bundle 插件名与 `@dsh-external/dsh-cli-app` 均由 cordis loader
-在 node_modules 中解析，全局安装后同层可见，无需额外链接。
+`@deepseek-ai/*` 依赖树。首启时 bin/code.js 把 vendor/dsh-cli-app 复制到
+node_modules/@dsh-external/dsh-cli-app；`dsh-base` 等 bundle 插件名与
+`@dsh-external/dsh-cli-app` 均由 cordis loader 在 node_modules 中解析，
+全局安装后同层可见，无需额外链接。
+
+> 设计说明：有意不使用 bundleDependencies/file: 依赖——实测 npm 11 的
+> 全局/git 安装路径对这两者存在空目录占位等兼容性问题（依赖壳有目录无内容）
 
 ## 版本对齐契约
 
