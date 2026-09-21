@@ -1,6 +1,6 @@
 {
   "name": "dsh-code-cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "aicode —— deepseek dsh 终端 AI 编程助手的 npm 全局安装封装（code profile Ink TUI）",
   "type": "module",
   "bin": {
