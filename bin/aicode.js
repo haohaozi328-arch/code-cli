@@ -62,7 +62,7 @@ function ensureProfile() {
 
 try {
   ensureCliApp()
-  ensureProfile()
+  ensureProfile(); ensureProfileLink()
 } catch (err) {
   console.error(`[aicode] 初始化失败：${err?.message ?? err}`)
   process.exit(1)
@@ -87,3 +87,22 @@ child.on('exit', (code, signal) => {
   if (signal) process.kill(process.pid, signal)
   else process.exit(code ?? 0)
 })
+
+import { symlinkSync } from 'node:fs'
+
+function ensureProfileLink() {
+  // Project the vendored bundle into the profile resolution path: the cordis
+  // loader imports plugin bodies relative to the profile directory, and
+  // packages outside the @deepseek-ai/dsh dependency closure are never linked
+  // into DSH_HOME/profiles/node_modules by the boot heal step.
+  const source = join(pkgRoot, 'node_modules', '@dsh-external', 'dsh-cli-app')
+  const scopeDir = join(dshHome(), 'profiles', 'code', 'node_modules', '@dsh-external')
+  const link = join(scopeDir, 'dsh-cli-app')
+  if (!existsSync(source) || existsSync(link)) return
+  mkdirSync(scopeDir, { recursive: true })
+  try {
+    symlinkSync(source, link, 'junction')
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err
+  }
+}
