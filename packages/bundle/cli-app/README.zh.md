@@ -41,6 +41,7 @@ dsh --profile cli --ui opencode         # switch the layout for one run
 ### 你会得到
 
 - 流式对话与思考过程展示（`Ctrl+R` 展开/收起最近一条），经 markdown 子集渲染：行内 code/**bold**/*italic*、围栏代码、标题、列表、引用。
+- 每条已提交的用户输入行前置 `▎` 竖线（Claude Code 风格的角色分隔），一眼区分用户输入与 AI 输出。
 - 全生命周期工具卡片：流式参数预览、折叠结果、running→done/error 状态与图标。
 - 审批提示（`[a] allow once · [r] reject · [esc] cancel`），自 agent scope 桥接，配 `/perm` 预设。
 - 会话面：`/new`、`/fork`、覆盖最近 50 条持久化会话的 `/sessions` 选择器，以及由真实模型目录驱动的 `/model` 选择器（切换即 fork 会话并保留历史）。

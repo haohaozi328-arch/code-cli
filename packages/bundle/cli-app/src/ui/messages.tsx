@@ -53,6 +53,12 @@ function reasoningPreview(reasoning: string): string {
   return line.slice(0, REASONING_PREVIEW_LIMIT)
 }
 
+/**
+ * Gutter glyph drawn in front of every user row so typed input stays visually
+ * distinct from assistant output at a glance (a vertical rule, Claude Code style).
+ */
+const USER_GUTTER = '▎'
+
 /** One tool card: state badge, argument preview, and the settled result. */
 function ToolRow(props: {
   message: UiMessage
@@ -120,7 +126,12 @@ export function MessageRow(props: {
   return (
     <Box flexDirection="column" marginBottom={1}>
       {chrome === 'classic' && <Text color={theme.brand} bold>{COPY.userLabel}</Text>}
-      <MarkdownText text={message.text} theme={theme} />
+      <Box flexDirection="row">
+        <Text color={theme.brand} bold>{USER_GUTTER} </Text>
+        <Box flexDirection="column" flexGrow={1}>
+          <MarkdownText text={message.text} theme={theme} />
+        </Box>
+      </Box>
     </Box>
   )
 }

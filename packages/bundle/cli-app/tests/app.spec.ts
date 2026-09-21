@@ -97,6 +97,18 @@ describe('App transcript', () => {
     instance.unmount()
   })
 
+  it('draws a gutter rule in front of user rows so input stands apart from AI output', () => {
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot({ messages: [userRow('u1', 'ask with gutter')] })),
+      theme: THEMES['deep-forest'],
+      ui: 'opencode',
+    }))
+    const frame = (instance.lastFrame() ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+    expect(frame).toContain('▎ ask with gutter')
+    instance.unmount()
+  })
+
   it('rebuilds the static transcript when the session key changes', () => {
     const instance = render(React.createElement(App, {
       key: 's-1',
