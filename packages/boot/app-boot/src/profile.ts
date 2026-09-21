@@ -648,7 +648,7 @@ function healProfileModuleFallback(profile: Profile, installationPackageNames: R
   const bundleAnchors = profile.layers
     .filter(layer => !installationPackageNames.has(layer.packageName))
     .map(layer => join(layer.packageDir, 'package.json'))
-  const bundleLinks = dependencyClosure(bundleAnchors, installationPackageNames, (candidate, packageName) => {
+  const excludeProfileProjection = (candidate: string, packageName: string): boolean => {
     const profileLink = join(profileModulesDir, packageName)
     if (canonicalLinkPath(candidate) !== canonicalLinkPath(profileLink)) return false
     try {
@@ -661,8 +661,20 @@ function healProfileModuleFallback(profile: Profile, installationPackageNames: R
       /* v8 ignore next -- see the host-filesystem exception above */
       throw error
     }
-  })
-  for (const layer of profile.layers) bundleLinks.delete(layer.packageName)
+  }
+  const bundleLinks = dependencyClosure(bundleAnchors, installationPackageNames, excludeProfileProjection)
+  // A bundle the Loader can already resolve from the profile directory through
+  // a path dsh did not project (a pnpm-managed dependency) must not be shadowed
+  // by an owned link. A bundle resolvable only from the installation anchor
+  // keeps its profile link: the Loader imports plugin bodies through the
+  // profile directory's parent walk, so without the link the package body
+  // could never load even though its patch layer composed fine.
+  const profileAnchor = join(profile.dir, 'package.json')
+  for (const layer of profile.layers) {
+    if (packageDirFromAnchor(profileAnchor, layer.packageName, excludeProfileProjection) !== undefined) {
+      bundleLinks.delete(layer.packageName)
+    }
+  }
   for (const packageName of ownedPackageNames(ownedModulesDir)) {
     if (!bundleLinks.has(packageName)) removeProfileSymlink(profileModulesDir, ownedModulesDir, packageName)
   }

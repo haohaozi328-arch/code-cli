@@ -387,6 +387,24 @@ describe('healProfilesModuleFallback', () => {
     expect(existsSync(join(profileB.dir, 'node_modules', '@scope', 'bundle-only'))).toBe(true)
   })
 
+  it('keeps a profile link for a bundle resolvable only from the installation anchor', async () => {
+    const installationAnchor = stageInstallation({})
+    const bundleAnchor = stageInstallation({ 'bundle-only': {} }, 'isolated-bundle')
+    const home = tmp()
+    const profile = stageProfile(home, 'isolated', bundleAnchor)
+    await healProfilesModuleFallback({ installAnchor: installationAnchor, profile, home })
+    await healProfilesModuleFallback({ installAnchor: installationAnchor, profile, home })
+    // The bundle body itself must stay importable from the profile directory
+    // even though no installation closure carries it: the Loader resolves
+    // plugin packages from the profile directory, not the installation anchor.
+    const owned = join(profile.dir, '.dsh-module-fallback', 'node_modules', 'isolated-bundle')
+    expect(readlinkSync(join(profile.dir, 'node_modules', 'isolated-bundle'))).toBe(owned)
+    expect(readlinkSync(owned)).toBe(realpathSync.native(join(bundleAnchor, '..')))
+    expect(readlinkSync(join(profile.dir, 'node_modules', 'bundle-only')))
+      .toBe(realpathSync.native(join(bundleAnchor, '..', 'node_modules', 'bundle-only')))
+    expect(existsSync(join(home, 'profiles', 'node_modules', 'isolated-bundle'))).toBe(false)
+  })
+
   it('combines packaged installation proxies with profile-local bundle links', async () => {
     const installationAnchor = stageInstallation({ shared: {} })
     const bundleAnchor = stageInstallation({ shared: {}, 'bundle-only': {} }, 'selected-bundle')
