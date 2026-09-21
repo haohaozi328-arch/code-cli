@@ -41,6 +41,7 @@ The `cli` profile is a user-layer directory (`~/.dsh/profiles/cli`) whose bundle
 ### What you get
 
 - Streaming chat with a reasoning display (`Ctrl+R` folds/unfolds the latest entry), rendered through a markdown subset: inline code/bold/italic, fenced code, headings, lists, quotes.
+- A `▎` gutter rule in front of every committed user row, so typed input stays visually distinct from assistant output (Claude Code style role separation).
 - Tool cards with the full lifecycle: streaming argument preview, folded result, running→done/error status with icons.
 - Approval prompts (`[a] allow once · [r] reject · [esc] cancel`) bridged from the agent scope, with `/perm` presets.
 - The session surface: `/new`, `/fork`, a `/sessions` picker over the 50 most recent persisted sessions, and a `/model` selector fed by the live model catalog (switching forks the session and keeps history).

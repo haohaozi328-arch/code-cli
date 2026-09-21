@@ -1,10 +1,10 @@
 {
   "name": "dsh-code-cli",
-  "version": "0.1.1",
-  "description": "code —— deepseek dsh 终端 AI 编程助手的 npm 全局安装封装（code profile Ink TUI）",
+  "version": "0.1.2",
+  "description": "aicode —— deepseek dsh 终端 AI 编程助手的 npm 全局安装封装（code profile Ink TUI）",
   "type": "module",
   "bin": {
-    "code": "bin/code.js"
+    "aicode": "bin/aicode.js"
   },
   "engines": {
     "node": ">=20"

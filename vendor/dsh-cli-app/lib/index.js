@@ -2969,6 +2969,11 @@ function previewToolResult(value) {
 function reasoningPreview(reasoning) {
 	return (reasoning.split("\n").find((candidate) => candidate.trim() !== "")?.trim() ?? "").slice(0, REASONING_PREVIEW_LIMIT);
 }
+/**
+* Gutter glyph drawn in front of every user row so typed input stays visually
+* distinct from assistant output at a glance (a vertical rule, Claude Code style).
+*/
+const USER_GUTTER = "▎";
 /** One tool card: state badge, argument preview, and the settled result. */
 function ToolRow(props) {
 	const { message, theme } = props;
@@ -3059,9 +3064,20 @@ function MessageRow(props) {
 			color: theme.brand,
 			bold: true,
 			children: COPY.userLabel
-		}), jsx(MarkdownText, {
-			text: message.text,
-			theme
+		}), jsxs(Box, {
+			flexDirection: "row",
+			children: [jsxs(Text, {
+				color: theme.brand,
+				bold: true,
+				children: [USER_GUTTER, " "]
+			}), jsx(Box, {
+				flexDirection: "column",
+				flexGrow: 1,
+				children: jsx(MarkdownText, {
+					text: message.text,
+					theme
+				})
+			})]
 		})]
 	});
 }
