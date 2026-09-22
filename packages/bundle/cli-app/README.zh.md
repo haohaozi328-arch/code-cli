@@ -45,13 +45,123 @@ dsh --profile cli --ui opencode         # switch the layout for one run
 - 全生命周期工具卡片：流式参数预览、折叠结果、running→done/error 状态与图标。
 - 审批提示（`[a] allow once · [r] reject · [esc] cancel`），自 agent scope 桥接，配 `/perm` 预设。
 - 会话面：`/new`、`/fork`、覆盖最近 50 条持久化会话的 `/sessions` 选择器，以及由真实模型目录驱动的 `/model` 选择器（切换即 fork 会话并保留历史）。
-- 技能调用（Claude Code / opencode 式）：`/skills` 弹出本会话用户可调用技能的选择器，每行一行：`/<名称>` 调用简写配简短功能描述（终端边缘截断、绝不折行）；输入即筛选、页脚回显关键词；回车把 `/<名称> ` 暂存进输入框等待补充指引，`/<名称> [指引]` 原样发送，由宿主 skill 边界为该步注入该技能的 `<skill_content>`——同名命令优先，未知或仅模型可调用的名字仍回 unknown 提示。
+- 技能调用（Claude Code / opencode 式）：`/skills` 弹出本会话用户可调用技能的选择器，每行一行：`/<名称>` 调用简写配简短功能描述（终端边缘截断、绝不折行）；输入即筛选、页脚回显关键词，`/skills <文本>` 则以该文本打开已筛选的列表；回车把 `/<名称> ` 暂存进输入框等待补充指引，`/<名称> [指引]` 原样发送，由宿主 skill 边界为该步注入该技能的 `<skill_content>`——同名命令优先，未知或仅模型可调用的名字仍回 unknown 提示。
 - 任务面板，投影 agent 的 `todo_write` 清单（`[✓]/[•]/[ ]`、`Ctrl+T` 折叠、resume/fork 后从 log 重建）。
 - 带计量的状态行：`token 42.5/s` 吞吐、累计用量，以及压缩落地即时降档的上下文占用环。
 - agent 运行时的盲文 spinner 与已用时间；运行中输入的普通提示按 FIFO 排队，空闲沿逐条发送（斜杠命令不受限）。
 - 一套交互内核上的两种布局：`classic`（单列、`❯` 提示、底部状态行）与 opencode 式（空会话居中欢迎页，对话后全宽）。
 - 全屏任务看板（`dsh-taskboard`）：`Ctrl+B` 把对话切换为看板——任务清单、可拖动的逐回合对话时间轴（↑↓ 或 PgUp/PgDn 选择回合，内容窗格按终端高度截取显示该回合对话、最新消息优先：时钟时段、你的提问、助手回复、工具调用与输出 token；`●` 标记 live 回合、`❯` 标记选中回合）、运行中的实时用时、排队深度与用量/上下文读数；同一组合键切回。
 - 输入历史与会话命名：↑/↓ 回溯本进程发过的提示词（每个会话用自己的持久化提示词播种共享历史），`/title <text>` 重命名会话、裸 `/title` 弹出行内编辑器（带当前持久化标题，Enter 确认、Esc 取消），`/title <text>` 仍可直接改名——状态栏与 `/sessions` 跟随持久化标题事件，手动重命名会钉住标题、自动生成不再覆盖。
+### 常用命令与描述
+
+在终端提示符输入 `/` 即可唤起交互式命令补全菜单，按 `↑` / `↓` 浏览选择，按 `Enter` 确认执行：
+
+| 指令 | 参数 | 说明 |
+|---|---|---|
+| `/new` | 无 | 新建一个全新会话并进入 |
+| `/fork` | 无 | 从当前会话的最近检查点分叉（Fork）出新会话，保留前序上下文 |
+| `/sessions` | 无 | 弹出历史会话选择器，可查看并切换最近 50 条持久化会话 |
+| `/model` | `[provider/model]` | 查看当前模型；若带参数则快速切换至指定模型并分叉会话 |
+| `/perm` | `[preset]` | 查看或设置权限预设（`workspace-write` / `danger-full-access` / `ask`） |
+| `/connect` | 无 | 启动交互式向导，配置并连接模型服务提供方（API Key、Base URL） |
+| `/title` | `[新标题]` | 查看或设置当前会话标题；不带参数时打开行内标题编辑器 |
+| `/skills` | `[筛选词]` | 打开技能选择器并查看本地可用技能，回车将技能指令带入输入框 |
+| `/mcp` | `[筛选词]` | 查看已连接的 MCP 服务器工具清单，回车可直接调用对应工具 |
+| `/help` | 无 | 查看终端快捷指令与快捷键帮助列表 |
+| `/quit`, `/exit` | 无 | 退出当前 CLI 交互会话 |
+
+### 键盘快捷键
+
+| 快捷键 | 功能说明 |
+|---|---|
+| `Ctrl+B` | **切换全屏任务看板（TaskBoard）**：查看任务清单、逐回合时间轴、详细工具调用记录与时钟耗时，再次按下返回对话 |
+| `Ctrl+T` | 折叠 / 展开当前会话的任务清单面板（TaskPanel） |
+| `Ctrl+R` | 空闲时展开 / 折叠上一条助手的思考过程（Reasoning） |
+| `Ctrl+C` | 助手正在运行时立即停止当前任务；空闲时退出应用 |
+| `Ctrl+D` / `Ctrl+Q` | 退出当前交互会话 |
+| `Ctrl+A` / `Home` | 输入时光标指针快速跳转到当前行行首 |
+| `Ctrl+E` / `End` | 输入时光标指针快速跳转到当前行行尾 |
+| `←` / `→` | 移动输入光标指针，支持在文字中间进行插入或修改 |
+| `Backspace` / `Delete` | 删除光标左侧字符，支持长按连续退格删除 |
+| `Del` | 删除光标当前所在字符（前向删除） |
+| `↑` / `↓` | 回溯并复用历史输入指令；在 `/` 菜单或选择器中上下移动选项目 |
+
+### MCP 服务器配置指南（用户配置 + AI 自适应）
+
+DeepSeek Harness 原生支持标准 Model Context Protocol (MCP) 规范，兼容 Claude Code 与 Cursor 配置生态。
+
+#### 1. 配置文件路径与作用域
+- **全局用户级配置**：`~/.dsh/mcp.json`（对应 `C:\Users\<用户名>\.dsh\mcp.json`），对该用户的所有会话和项目全局生效。
+- **项目级配置**：`<项目根目录>/.dsh/mcp.json`，仅在当前工作区项目中生效，优先级高于用户级配置。
+
+#### 2. `mcp.json` 配置格式
+支持 `stdio` 本地进程通信与 `sse` / `streamable-http` 远程网络协议：
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/workspace"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "remote-tools": {
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_TOKEN"
+      }
+    }
+  }
+}
+```
+
+#### 3. 命令行快捷管理
+您可直接使用 `dsh mcp` 命令行工具管理服务器：
+```sh
+dsh mcp list                        # 列出所有已配置的 MCP 服务器及其状态
+dsh mcp add git --command "uvx" "mcp-server-git"  # 添加 stdio 类型的 MCP 服务器
+dsh mcp add api --url "https://api.example.com/sse" # 添加远程 SSE 类型的 MCP 服务器
+dsh mcp test git                    # 测试指定 MCP 服务器的连通性与工具发现
+dsh mcp remove git                  # 移除指定的 MCP 服务器
+```
+
+#### 4. 终端交互与 AI 协同
+- **用户主动调用**：在终端输入 `/mcp` 或 `/mcp 搜索词` 唤起工具列表，选择工具后回车即可在会话中直接执行。
+- **AI 智能自适应**：CLI 在启动与会话流转时会自动将配置中的 MCP 实例挂载进 Cordis 插件体系。AI 会自主探测可用 MCP 工具，按需发起形如 `mcp__<server>__<tool>` 的工具调用，无缝协同完成代码、文件、网络等复杂工作。
+
+### Skills 技能库配置指南（用户配置 + AI 自动发现）
+
+技能（Skills）是扩展智能体特定领域专业能力的规范化指导手册。
+
+#### 1. 技能存放路径
+- **用户级技能目录**：`~/.dsh/skills`（即 `C:\Users\<用户名>\.dsh\skills` 或 `/home/<用户>/.dsh/skills`）
+- **项目级技能目录**：`<项目根目录>/.dsh/skills`
+- **公共共享目录**：`~/.agents/skills` 与 `<项目根目录>/.agents/skills`
+
+#### 2. 技能格式定义
+支持单文件平铺（`.md`）或目录包形式（`<skill-name>/SKILL.md`）：
+
+**单文件示例**：`~/.dsh/skills/git-commit-helper.md`
+```markdown
+---
+name: git-commit-helper
+description: 自动分析当前工作区的 git diff 并生成规范的 Conventional Commits 提交说明
+disable-model-invocation: false
+---
+
+# Git Commit 规范化辅助技能
+当用户要求提交代码或撰写 commit message 时：
+1. 运行 git diff 检查改动；
+2. 遵循 `<type>(<scope>): <subject>` 规范；
+3. 输出清晰的变更摘要。
+```
+
+#### 3. 技能使用
+- **用户快捷唤起**：键入 `/skills` 打开本地技能选择器，或者直接输入 `/skills git` 快速定位。选中后按 Enter 会暂存为 `/<name> `，方便附加上下文后发送。
+- **AI 动态发现与加载**：在任务执行过程中，AI 会通过 `tool-skill` 自主检索匹配技能，并在对应回合注入技能的 `<skill_content>` 指南，准确执行用户制定的业务标准。
 
 -----
 
@@ -80,6 +190,7 @@ bundle 是一个 patch 加一个 glue 插件。patch 为其单会话树 restate 
 | [`src/ui/state.ts`](src/ui/state.ts) | ViewModel：事件接线、动作、斜杠命令、运行排队 |
 | [`src/ui/status.ts`](src/ui/status.ts) | 状态行算法：吞吐、用量、上下文占用与环 |
 | [`src/ui/resize.ts`](src/ui/resize.ts) | 缩窄 reflow 擦除校正（包 `stdout.write`） |
+| [`src/ui/live-budget.ts`](src/ui/live-budget.ts) | 活动区行数预算：把一帧压在 Ink 视口高度重置线之下的裁剪 |
 | [`src/ui/App.tsx`](src/ui/App.tsx) | 根布局：Static 转录 + 活动区 + 输入 + 停靠面板 |
 | [`tests/`](tests) | 单测（无 key，脚本化 agent）+ REAL-composition + 真 Ink reflow 断言 |
 
@@ -124,6 +235,7 @@ persona restate 是固定前缀内容，不会扰动轮次间的 KV-cache 复用
 - **思考折叠**：默认折叠为单行；`Ctrl+R` 展开/收起最近一条。
 - **tool-call 参数流式预览**：流式行上的过渡预览；落地卡片接管。
 - **转录不截断**：`state.messages` 与 durable log 等长（每行一个轻量对象）；已定稿的静态行写入后即离开 React 树。`/clear` 只清当前视口并重建静态列表；终端 scrollback 保留。
+- **流式绘制按视口裁剪**：行未定稿前，活动区被裁到视口剩余行数（`src/ui/live-budget.ts`）——一帧达到 `stdout.rows` 时 Ink 会清屏、擦除 scrollback 并重放全部已提交行，那正是快速输出时的闪烁来源。该行定稿进入 `<Static>` 时全文打印一次，durable log 始终不缩短。
 - **tokens**：resume 时从 durable log 补计用量；流式吞吐读数的前半段是字符密度估算，provider usage 到达后替换。
 - **注册表斜杠命令**：`/compact /goal /plan` 经 `ctx.commands` 执行，输出作为普通可见行；未注册的 `/xxx` 提示 unknown，不发给模型。
 - **输入**：单行输入（退格可用）；方向键编辑/多行粘贴未实现。

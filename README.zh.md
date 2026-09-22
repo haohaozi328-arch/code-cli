@@ -43,6 +43,25 @@ pnpm dsh web
 ```
 
 `pnpm run build` 会准备仓库产物。`pnpm dsh web` 会直接使用这些已构建产物，不会重新构建。
+### 终端交互界面（CLI TUI）
+
+除了 Web 界面外，DeepSeek Harness 还提供了全功能的终端交互界面（TUI）：
+
+```sh
+pnpm dsh --profile cli
+```
+
+- **常用命令**：输入 `/` 呼出补全菜单，支持 `/new`（新建会话）、`/fork`（分支）、`/sessions`（历史记录）、`/model`（换模型）、`/perm`（权限预设）、`/connect`（连接提供方）、`/title`（会话改名）、`/skills`（技能库）、`/mcp`（MCP 工具库）等。
+- **核心快捷键**：
+  - `Ctrl+B`：**切换全屏任务看板（TaskBoard）**，查看任务清单、逐回合历史时间线与时钟耗时；
+  - `Ctrl+T`：折叠 / 展开任务清单；
+  - `Ctrl+R`：展开 / 收起思考过程；
+  - `Ctrl+C`：运行中取消任务，空闲时退出；
+  - `←` / `→`：移动输入指针进行局部文本修改；
+  - `Backspace` / `Delete`：删除字符，支持长按连续退格。
+- **MCP 与 Skills 生态**：
+  - **MCP**：支持用户级 `~/.dsh/mcp.json` 与项目级 `<project>/.dsh/mcp.json`，可通过 `dsh mcp add/list/test` 管理，终端内通过 `/mcp` 快捷调用，AI 亦可自主按需调用。
+  - **Skills**：技能放置于 `~/.dsh/skills`（用户级）或 `<project>/.dsh/skills`（项目级），终端内输入 `/skills` 即可唤起并带入上下文。
 
 ## 社区与支持
 

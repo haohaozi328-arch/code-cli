@@ -25,6 +25,8 @@ const invocation = parseDshArgs(process.argv.slice(2), readVersion())
 
 switch (invocation.mode) {
   case 'profile': {
+    const { bootProgress } = await import('./boot-progress.ts')
+    bootProgress.start('正在初始化环境与启动配置...')
     const { runProfile } = await import('./profile-boot.ts')
     await runProfile({
       environment: loadLayeredEnv('dsh'),

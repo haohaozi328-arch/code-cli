@@ -34,6 +34,7 @@ import { installProxyFromEnvironment } from '@deepseek-ai/dsh-http-proxy'
 import { DSH_LAUNCH_ENVIRONMENT_KEY, type LaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
 import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { createProcessShutdown, type ProcessShutdown } from './process-shutdown.ts'
+import { bootProgress } from './boot-progress.ts'
 
 const NAME = 'dsh'
 
@@ -216,8 +217,10 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
     options.environment,
     (message) => { process.stderr.write(`${NAME}: ${message}\n`) },
   )
+  bootProgress.update(30, '正在加载并解析 Cordis 组合配置与插件层...')
 
   const composed = await composeProfile(options.profile, options.patchFiles)
+  bootProgress.update(55, '正在装配插件体系与 MCP/Skills 架构...')
   const app: { current?: Context } = {}
   const appReady = createAppReady()
   const shutdown = createProcessShutdown(async () => {
@@ -226,6 +229,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   })
   const signalShutdown = new AbortController()
   const interrupt = (code: number): void => {
+    bootProgress.finish()
     signalShutdown.abort()
     shutdown.interrupt(code)
   }
@@ -261,6 +265,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   ])
   // Cloned for the same insert-aliasing reason as composeLive: the boot
   // application must not mutate the objects later reloads recompose from.
+  bootProgress.update(80, '正在准备会话环境与终端界面...')
   const ctx = await boot(NAME, rootConfig, structuredClone(allPatches(composed)), (hostCtx) => {
     app.current = hostCtx
     // Before any config-tree entry mounts, so plugins resolve all launch-time
@@ -314,6 +319,7 @@ export async function runProfile(options: RunProfileOptions): Promise<{ ctx: Con
   if (!signalShutdown.signal.aborted
     && ctx.fiber.state === FiberState.ACTIVE
     && ctx.get('loader') !== undefined) {
+    bootProgress.finish()
     appReady.commit()
   }
   return { ctx, shutdown }

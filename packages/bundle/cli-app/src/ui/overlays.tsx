@@ -164,16 +164,26 @@ export function CommandMenu(props: {
   theme: ThemeTokens
 }): React.JSX.Element {
   const { matches, selected, theme } = props
+  const maxVisible = 8
+  let start = 0
+  if (matches.length > maxVisible) {
+    start = Math.max(0, Math.min(selected - Math.floor(maxVisible / 2), matches.length - maxVisible))
+  }
+  const visibleMatches = matches.slice(start, start + maxVisible)
   return (
     <Box flexDirection="column" marginTop={1}>
       <Text color={theme.muted} dimColor>{COPY.commandsHint}</Text>
-      {matches.map((candidate, index) => (
-        <Text key={candidate.name} color={index === selected ? theme.brand : theme.muted} bold={index === selected}>
-          {index === selected ? `${SELECT_MARKER} ` : '  '}
-          {candidate.name}
-          <Text dimColor>  {candidate.hint}{candidate.arg !== undefined ? `  ·  ${candidate.arg}` : ''}</Text>
-        </Text>
-      ))}
+      {visibleMatches.map((candidate, i) => {
+        const actualIndex = start + i
+        const isSelected = actualIndex === selected
+        return (
+          <Text key={candidate.name} color={isSelected ? theme.brand : theme.muted} bold={isSelected}>
+            {isSelected ? `${SELECT_MARKER} ` : '  '}
+            {candidate.name}
+            <Text dimColor>  {candidate.hint}{candidate.arg !== undefined ? `  ·  ${candidate.arg}` : ''}</Text>
+          </Text>
+        )
+      })}
     </Box>
   )
 }

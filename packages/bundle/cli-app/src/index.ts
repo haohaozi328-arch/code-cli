@@ -314,6 +314,7 @@ async function run(ctx: Context, config: Config): Promise<void> {
       // rerender whose new root key rebuilds the transcript, not a second app.
       const element = React.createElement(App, { key: agent.id, vm, theme, ui: chrome })
       if (ink === null) {
+        if (process.stdout.isTTY) process.stdout.write('\r\x1b[2K')
         ink = internals.render(element)
       } else {
         ink.rerender(element)

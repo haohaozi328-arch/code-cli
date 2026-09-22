@@ -386,16 +386,23 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     notify()
   }
 
-  /** Open the `/skills` list: the user-invocable skills this session's composition exposes. */
-  const openSkillPicker = (): void => {
+  /**
+   * Open the `/skills` list: the user-invocable skills this session's
+   * composition exposes, optionally narrowed by the text the command carried.
+   * @param filter - initial filter for the picker's type-to-filter field.
+   */
+  const openSkillPicker = (filter = ''): void => {
     if (skillRegistry === undefined) {
       appendNotice(COPY.skillsUnavailable)
       return
     }
+    // The argument is the picker's own opening filter, so a known name skips
+    // the scroll; the row the user lands on still stages `/name ` in the composer.
+    const seeded = filter === '' ? {} : { filter }
     // The catalog scan is asynchronous: open the frame immediately so Esc
     // stays live while the provider works, and let the epoch retire a late
     // response landing after the user already left (or opened another picker).
-    setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items: [], note: COPY.skillLoading })
+    setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items: [], note: COPY.skillLoading, ...seeded })
     const loadEpoch = choiceEpoch
     void skillRegistry.list({ cwd: session.header.cwd, scope: agent })
       .then((skills) => {
@@ -411,13 +418,46 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
           appendNotice(COPY.skillsUnavailable)
           return
         }
-        setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items })
+        setChoicePicker({ kind: 'skill', title: COPY.choiceTitleSkills, items, ...seeded })
       })
       .catch((failure: unknown) => {
         if (choiceEpoch !== loadEpoch) return
         setChoicePicker(null)
         appendNotice(`${COPY.skillsFailedPrefix}${renderError(failure)}`)
       })
+  }
+
+  /**
+   * Open the `/mcp` list: all MCP tools this session's composition exposes
+   * (prefixed with `mcp__`), optionally narrowed by the text the command carried.
+   * @param filter - initial filter for the picker's type-to-filter field.
+   */
+  const openMcpPicker = (filter = ''): void => {
+    const toolsService = ctx.get('tools') as {
+      schemas?: (scope?: unknown) => Array<{ name: string; description?: string; parameters?: unknown }>
+    } | undefined
+    if (toolsService === undefined || typeof toolsService.schemas !== 'function') {
+      appendNotice(COPY.mcpUnavailable)
+      return
+    }
+    const seeded = filter === '' ? {} : { filter }
+    const allSchemas = toolsService.schemas(agent) ?? []
+    const mcpSchemas = allSchemas.filter(s => s.name.startsWith('mcp__'))
+    if (mcpSchemas.length === 0) {
+      appendNotice(COPY.mcpUnavailable)
+      return
+    }
+    const items: ChoiceItem[] = mcpSchemas.map((schema) => {
+      const parts = schema.name.split('__')
+      const serverName = parts[1] ?? 'mcp'
+      const description = (schema.description || '').replace(/\s+/g, ' ').trim()
+      return {
+        label: `/${schema.name}`,
+        value: schema.name,
+        description: `[${serverName}] ${description}`.trim(),
+      }
+    })
+    setChoicePicker({ kind: 'mcp', title: COPY.choiceTitleMcp, items, note: `${items.length} 个 MCP 工具可用`, ...seeded })
   }
 
   const connect = new ConnectController(ctx, {
@@ -477,6 +517,19 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
     if (commands !== undefined && commands.find(agent, bare) !== undefined) {
       dispatchRegistryCommand(name, line)
       return
+    }
+    if (bare.startsWith('mcp__')) {
+      const toolsService = ctx.get('tools') as {
+        get?: (name: string, scope?: unknown) => unknown
+      } | undefined
+      if (toolsService !== undefined && typeof toolsService.get === 'function' && toolsService.get(bare, agent) !== undefined) {
+        const args = line.slice(name.length).trim()
+        const prompt = args !== ''
+          ? `请调用 MCP 工具 \`${bare}\`，参数如下：\n${args}`
+          : `请调用 MCP 工具 \`${bare}\`。`
+        submitOrQueue(prompt, line)
+        return
+      }
     }
     if (skillRegistry === undefined) {
       setError(`unknown command: ${name}; try /help`)
@@ -544,11 +597,14 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
         else openPolicyPicker()
         return
       case '/skills':
-        // Bare /skills opens the skill choice list; an argument is not a
-        // filter — the picked skill lands in the composer as `/name ` and the
-        // user appends guidance before sending.
-        if (rest !== '') setError(COPY.skillsUsage)
-        else openSkillPicker()
+        // Bare /skills opens the skill choice list; `/skills <text>` opens the
+        // same list already narrowed to that text. Neither one sends: the
+        // picked skill lands in the composer as `/name ` and the user appends
+        // guidance before sending.
+        openSkillPicker(rest)
+        return
+      case '/mcp':
+        openMcpPicker(rest)
         return
       case '/connect':
         if (rest !== '') connect.start(rest)
@@ -854,6 +910,11 @@ export function createViewModel(options: ViewModelOptions): ViewModel {
       void name
       setChoicePicker(null)
     },
+    openMcpPicker,
+    pickMcp(name) {
+      void name
+      setChoicePicker(null)
+    },
     openConnectPicker() {
       connect.openPicker()
     },
@@ -905,9 +966,7 @@ export const COMMAND_HINTS: readonly CommandHint[] = [
   { name: '/perm', hint: '权限预设', arg: 'workspace-write|danger-full-access' },
   { name: '/connect', hint: '连接模型提供方' },
   { name: '/title', hint: '重命名会话', arg: 'text' },
-  { name: '/skills', hint: '选择并调用技能' },
-  { name: '/goal', hint: '管理会话目标' },
-  { name: '/plan', hint: '进入计划模式' },
-  { name: '/clear', hint: '清空当前显示' },
+  { name: '/skills', hint: '选择并调用技能', arg: '筛选词' },
+  { name: '/mcp', hint: '查看与使用 MCP 工具', arg: '筛选词' },
   { name: '/quit', hint: '退出应用', arg: '或 /exit' },
 ]

@@ -21,6 +21,7 @@ import { COPY, WORDMARK } from './copy.ts'
 import type { UiMessage, ViewModel } from './model.ts'
 import { COMMAND_HINTS } from './state.ts'
 import { collapseFirstLine, splitTranscript } from './transcript.ts'
+import { LIVE_CHROME, fitLiveMessages, liveRowBudget } from './live-budget.ts'
 import { ApprovalModal, ChoiceList, CommandMenu, ConnectPrompt, SessionPicker, TitlePrompt } from './overlays.tsx'
 import { MessageRow } from './messages.tsx'
 import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
@@ -45,6 +46,53 @@ function previewInput(value: string): string {
   const compact = value.replace(/\r?\n/g, COPY.inputNewlineMark)
   if (compact.length <= INPUT_PREVIEW_LIMIT) return compact
   return `${compact.slice(0, INPUT_PREVIEW_LIMIT)}…`
+}
+
+/** Detect whether a keypress is Backspace across platforms (macOS delete, xterm DEL, etc.). */
+function isBackspaceKey(chunk: string, key: { backspace: boolean; delete: boolean }): boolean {
+  return Boolean(key.backspace || chunk === '\x08' || chunk === '\x7f' || (key.delete && chunk !== '\x1b[3~'))
+}
+
+/** Detect whether a keypress is forward Delete (PC Del key, etc.). */
+function isForwardDeleteKey(chunk: string, key: { delete: boolean }): boolean {
+  return Boolean(key.delete && chunk === '\x1b[3~')
+}
+
+/** Render prompt input with an interactive cursor pointer. */
+function renderInputWithCursor(
+  text: string,
+  cursor: number,
+  theme: ThemeTokens,
+  running: boolean,
+  placeholder?: string,
+): React.JSX.Element {
+  if (text === '') {
+    return (
+      <>
+        {placeholder !== undefined ? <Text color={theme.muted} dimColor>{placeholder}</Text> : null}
+        {!running && <Text color={theme.brand}>▌</Text>}
+      </>
+    )
+  }
+  const clamped = Math.min(Math.max(0, cursor), text.length)
+  if (clamped >= text.length) {
+    return (
+      <>
+        <Text color={theme.text}>{previewInput(text)}</Text>
+        <Text color={theme.brand}>▌</Text>
+      </>
+    )
+  }
+  const before = previewInput(text.slice(0, clamped))
+  const under = previewInput(text.slice(clamped, clamped + 1)) || ' '
+  const after = previewInput(text.slice(clamped + 1))
+  return (
+    <>
+      <Text color={theme.text}>{before}</Text>
+      <Text inverse bold color={theme.brand}>{under}</Text>
+      <Text color={theme.text}>{after}</Text>
+    </>
+  )
 }
 
 /** Follow terminal size: width drives the centered column, rows drive the welcome offset. */
@@ -142,6 +190,11 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const chrome: UiChrome = ui
   const state = useSyncExternalStore(vm.subscribe, vm.getState)
   const [input, setInput] = useState('')
+  const inputRef = useRef(input)
+  inputRef.current = input
+  const [cursorPos, setCursorPos] = useState(0)
+  const cursorRef = useRef(0)
+  cursorRef.current = Math.min(cursorPos, input.length)
   const [pickerIndex, setPickerIndex] = useState(0)
   const [sessionSearch, setSessionSearch] = useState('')
   const [commandIndex, setCommandIndex] = useState(0)
@@ -184,7 +237,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   // Slash-command palette: matched while the buffer starts with '/'.
   const commandQuery = input.startsWith('/') ? input.toLowerCase() : null
   const commandMatches = useMemo(
-    () => commandQuery === null ? [] : COMMAND_HINTS.filter(candidate => candidate.name.startsWith(commandQuery)).slice(0, 8),
+    () => (commandQuery === null ? [] : COMMAND_HINTS.filter(candidate => candidate.name.startsWith(commandQuery))),
     [commandQuery],
   )
   const commandMenuOpen = commandQuery !== null && commandMatches.length > 0
@@ -214,7 +267,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     // an async catalog swap replaces the placeholder with the real list.
     if (choicePicker !== null && choicePickerWasNull.current) {
       setChoiceIndex(0)
-      setChoiceSearch('')
+      // `/skills <text>` opens the list with its argument already in the
+      // field the user would otherwise type into.
+      setChoiceSearch(choicePicker.filter ?? '')
     }
     choicePickerWasNull.current = choicePicker === null
   }, [choicePicker])
@@ -233,6 +288,79 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   useEffect(() => {
     setCommandIndex(0)
   }, [input])
+
+  const setInputValue = (val: string) => {
+    inputRef.current = val
+    setInput(val)
+    cursorRef.current = val.length
+    setCursorPos(val.length)
+  }
+
+  const insertText = (chunk: string) => {
+    const cur = Math.min(cursorRef.current, inputRef.current.length)
+    const nextCur = cur + chunk.length
+    cursorRef.current = nextCur
+    setCursorPos(nextCur)
+    setInput(prev => {
+      const c = Math.min(cur, prev.length)
+      const next = prev.slice(0, c) + chunk + prev.slice(c)
+      inputRef.current = next
+      return next
+    })
+  }
+
+  const deleteBackward = () => {
+    const cur = Math.min(cursorRef.current, inputRef.current.length)
+    if (cur === 0) return
+    const nextCur = cur - 1
+    cursorRef.current = nextCur
+    setCursorPos(nextCur)
+    setInput(prev => {
+      const c = Math.min(cur, prev.length)
+      if (c === 0) return prev
+      const next = prev.slice(0, c - 1) + prev.slice(c)
+      inputRef.current = next
+      return next
+    })
+  }
+
+  const deleteForward = () => {
+    const cur = Math.min(cursorRef.current, inputRef.current.length)
+    if (cur >= inputRef.current.length) return
+    setInput(prev => {
+      const c = Math.min(cur, prev.length)
+      if (c >= prev.length) return prev
+      const next = prev.slice(0, c) + prev.slice(c + 1)
+      inputRef.current = next
+      return next
+    })
+  }
+
+  const moveCursorLeft = () => {
+    setCursorPos(prev => {
+      const next = Math.max(0, prev - 1)
+      cursorRef.current = next
+      return next
+    })
+  }
+
+  const moveCursorRight = () => {
+    setCursorPos(prev => {
+      const next = Math.min(input.length, prev + 1)
+      cursorRef.current = next
+      return next
+    })
+  }
+
+  const moveCursorHome = () => {
+    cursorRef.current = 0
+    setCursorPos(0)
+  }
+
+  const moveCursorEnd = () => {
+    cursorRef.current = input.length
+    setCursorPos(input.length)
+  }
 
   useInput((chunk, key) => {
     const lower = chunk.toLowerCase()
@@ -340,6 +468,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
               vm.pickSkill(item.value)
               setInput(`/${item.value} `)
               break
+            case 'mcp':
+              vm.pickMcp(item.value)
+              setInput(`/${item.value} `)
+              break
             default:
               assertNever(choicePicker.kind)
           }
@@ -370,40 +502,80 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     if (connectWizard !== null) {
       if (key.return) {
         vm.submitConnectInput(input)
-        setInput('')
+        setInputValue('')
         return
       }
       if (key.escape || (key.ctrl && lower === 'c')) {
         vm.cancelConnect()
-        setInput('')
+        setInputValue('')
         return
       }
-      if (key.backspace || key.delete) {
-        setInput(prev => prev.slice(0, -1))
+      if (key.leftArrow) {
+        moveCursorLeft()
         return
       }
-      if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return
-      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      if (key.rightArrow) {
+        moveCursorRight()
+        return
+      }
+      if (key.ctrl && lower === 'a') {
+        moveCursorHome()
+        return
+      }
+      if (key.ctrl && lower === 'e') {
+        moveCursorEnd()
+        return
+      }
+      if (isBackspaceKey(chunk, key)) {
+        deleteBackward()
+        return
+      }
+      if (isForwardDeleteKey(chunk, key)) {
+        deleteForward()
+        return
+      }
+      if (key.upArrow || key.downArrow || key.tab) return
+      if (chunk !== '' && !key.ctrl && !key.meta) insertText(chunk)
       return
     }
     // Priority 4.5: the /title text-field editor.
     if (titleEditor !== null) {
       if (key.return) {
         vm.submitTitle(input)
-        setInput('')
+        setInputValue('')
         return
       }
       if (key.escape || (key.ctrl && lower === 'c')) {
         vm.cancelTitleEditor()
-        setInput('')
+        setInputValue('')
         return
       }
-      if (key.backspace || key.delete) {
-        setInput(prev => prev.slice(0, -1))
+      if (key.leftArrow) {
+        moveCursorLeft()
         return
       }
-      if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return
-      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      if (key.rightArrow) {
+        moveCursorRight()
+        return
+      }
+      if (key.ctrl && lower === 'a') {
+        moveCursorHome()
+        return
+      }
+      if (key.ctrl && lower === 'e') {
+        moveCursorEnd()
+        return
+      }
+      if (isBackspaceKey(chunk, key)) {
+        deleteBackward()
+        return
+      }
+      if (isForwardDeleteKey(chunk, key)) {
+        deleteForward()
+        return
+      }
+      if (key.upArrow || key.downArrow || key.tab) return
+      if (chunk !== '' && !key.ctrl && !key.meta) insertText(chunk)
       return
     }
     // Priority 5: slash-command palette.
@@ -420,22 +592,42 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
         const chosen = commandMatches[effectiveCommandIndex]
         if (chosen !== undefined) {
           const line = input.trimEnd()
-          setInput('')
+          setInputValue('')
           // Execute through the same dispatch the typed line would use.
           vm.send(chosen.name + (line.length > chosen.name.length ? line.slice(chosen.name.length) : ''))
         }
         return
       }
       if (key.escape || (key.ctrl && lower === 'c')) {
-        setInput('')
+        setInputValue('')
+        return
+      }
+      if (key.leftArrow) {
+        moveCursorLeft()
+        return
+      }
+      if (key.rightArrow) {
+        moveCursorRight()
+        return
+      }
+      if (key.ctrl && lower === 'a') {
+        moveCursorHome()
+        return
+      }
+      if (key.ctrl && lower === 'e') {
+        moveCursorEnd()
         return
       }
       // Editing keys still operate on the buffer (backspace / typing filters).
-      if (key.backspace || key.delete) {
-        setInput(prev => prev.slice(0, -1))
+      if (isBackspaceKey(chunk, key)) {
+        deleteBackward()
         return
       }
-      if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+      if (isForwardDeleteKey(chunk, key)) {
+        deleteForward()
+        return
+      }
+      if (chunk !== '' && !key.ctrl && !key.meta) insertText(chunk)
       return
     }
     // Reserved control chords. Ink reports ctrl+c as key.ctrl with the literal
@@ -456,7 +648,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     }
     if (key.return) {
       const line = input.trimEnd()
-      setInput('')
+      setInputValue('')
       if (line !== '') vm.send(line)
       return
     }
@@ -469,22 +661,42 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       }
       return
     }
+    if (key.ctrl && lower === 'a') {
+      moveCursorHome()
+      return
+    }
+    if (key.ctrl && lower === 'e') {
+      moveCursorEnd()
+      return
+    }
+    if (key.leftArrow) {
+      moveCursorLeft()
+      return
+    }
+    if (key.rightArrow) {
+      moveCursorRight()
+      return
+    }
     // Non-printable navigation / editing keys.
-    if (key.backspace || key.delete) {
-      setInput(prev => prev.slice(0, -1))
+    if (isBackspaceKey(chunk, key)) {
+      deleteBackward()
+      return
+    }
+    if (isForwardDeleteKey(chunk, key)) {
+      deleteForward()
       return
     }
     // Prompt history: ↑/↓ walk back through the prompts this process has sent;
     // stepping past the newest restores the draft that was being typed.
     if (key.upArrow || key.downArrow) {
       const recalled = key.upArrow ? vm.historyOlder(input) : vm.historyNewer(input)
-      if (recalled !== null) setInput(recalled)
+      if (recalled !== null) setInputValue(recalled)
       return
     }
-    if (key.escape || key.tab || key.leftArrow || key.rightArrow) return
+    if (key.escape || key.tab) return
     // Anything else printable lands in the buffer, including IME-composed text
     // and shifted symbols. Ctrl/meta chords were handled above.
-    if (chunk !== '' && !key.ctrl && !key.meta) setInput(prev => prev + chunk)
+    if (chunk !== '' && !key.ctrl && !key.meta) insertText(chunk)
   })
 
   const renderRow = (message: UiMessage): React.JSX.Element => (
@@ -510,7 +722,6 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       {renderRow}
     </Static>
   )
-  const liveList = <Box flexDirection="column">{live.map(renderRow)}</Box>
 
   const overlays = (
     <>
@@ -548,13 +759,47 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     </Box>
   )
 
+  // Ink erases its own rows between frames, but a frame that reaches the
+  // viewport height instead clears the screen, drops the terminal's scrollback,
+  // and replays every committed row. A fast answer crosses that line on one
+  // chunk and falls back under it on the next, which is the flash output
+  // produces while it pours. Keep the live rows inside what the mounted chrome
+  // leaves them: the threshold is then never reached, and the clipped head
+  // returns when its row settles into `<Static>` (see `live-budget.ts`).
+  const chromeRows = (chrome === 'classic'
+    ? LIVE_CHROME.classicInput + LIVE_CHROME.statusLine
+    : LIVE_CHROME.opencodeComposer)
+    + (state.error !== null ? LIVE_CHROME.error : 0)
+    + (pendingApproval !== null ? LIVE_CHROME.approval : 0)
+    + (pickerOpen ? LIVE_CHROME.sessionPicker : 0)
+    + (choicePicker !== null ? LIVE_CHROME.choicePicker : 0)
+    + (commandMenuOpen ? LIVE_CHROME.commandMenu : 0)
+    + (connectWizard !== null || titleEditor !== null ? LIVE_CHROME.prompt : 0)
+    + (todosVisible ? LIVE_CHROME.todoPanel + (todos?.length ?? 0) : 0)
+    + (state.queued.length > 0 ? LIVE_CHROME.queued : 0)
+  const liveFit = useMemo(
+    () => fitLiveMessages(live, liveRowBudget(rows, chromeRows), {
+      columns,
+      labeled: chrome === 'classic',
+      expandedKey: expandedReasoning,
+    }),
+    [live, rows, chromeRows, columns, chrome, expandedReasoning],
+  )
+  const liveList = (
+    <Box flexDirection="column">
+      {liveFit.notice && (
+        <Text color={theme.muted} dimColor>
+          {`${COPY.liveTailMore}${liveFit.hiddenRows} ${COPY.liveTailRest}`}
+        </Text>
+      )}
+      {liveFit.messages.map(renderRow)}
+    </Box>
+  )
+
   const classicInput = (
     <Box marginTop={1}>
       <Text color={theme.brand}>❯ </Text>
-      {input === ''
-        ? <Text color={theme.muted} dimColor>{COPY.classicInputPlaceholder}</Text>
-        : <Text color={theme.text}>{previewInput(input)}</Text>}
-      <Text color={theme.brand}>{running || input !== '' ? '' : '▌'}</Text>
+      {renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder)}
     </Box>
   )
 
@@ -563,10 +808,13 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       <Box borderStyle="round" borderColor={theme.brand} marginTop={1} paddingX={1} flexDirection="column">
         <Box>
           <Text color={theme.brand}>{'> '}</Text>
-          {input === ''
-            ? <Text color={theme.muted} dimColor>{connectWizard !== null || titleEditor !== null ? '' : COPY.composerPlaceholder}</Text>
-            : <Text color={theme.text}>{previewInput(input)}</Text>}
-          <Text color={theme.brand}>{input === '' && !running ? '▌' : ''}</Text>
+          {renderInputWithCursor(
+            input,
+            cursorPos,
+            theme,
+            running,
+            connectWizard !== null || titleEditor !== null ? undefined : COPY.composerPlaceholder,
+          )}
         </Box>
         <Box marginTop={1} justifyContent="space-between">
           <Text color={theme.muted} dimColor>

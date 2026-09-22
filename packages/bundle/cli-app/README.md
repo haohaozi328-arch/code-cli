@@ -45,13 +45,123 @@ The `cli` profile is a user-layer directory (`~/.dsh/profiles/cli`) whose bundle
 - Tool cards with the full lifecycle: streaming argument preview, folded result, running→done/error status with icons.
 - Approval prompts (`[a] allow once · [r] reject · [esc] cancel`) bridged from the agent scope, with `/perm` presets.
 - The session surface: `/new`, `/fork`, a `/sessions` picker over the 50 most recent persisted sessions, and a `/model` selector fed by the live model catalog (switching forks the session and keeps history).
-- Skill invocation (Claude Code / opencode style): `/skills` opens a picker over the session's user-invocable skills, one-line rows pairing the `/<name>` invocation shorthand with the skill's simple description (clipped at the terminal edge, never wrapping); typing narrows the list and the footer echoes the query; Enter stages `/<name> ` in the composer and waits for your guidance, and `/<name> [guidance]` sends the line verbatim so the host skill boundary injects the skill's `<skill_content>` for that step — same-named commands win, unknown or model-only names keep the unknown-command hint.
+- Skill invocation (Claude Code / opencode style): `/skills` opens a picker over the session's user-invocable skills, one-line rows pairing the `/<name>` invocation shorthand with the skill's simple description (clipped at the terminal edge, never wrapping); typing narrows the list and the footer echoes the query, and `/skills <text>` opens the same list already narrowed to that text; Enter stages `/<name> ` in the composer and waits for your guidance, and `/<name> [guidance]` sends the line verbatim so the host skill boundary injects the skill's `<skill_content>` for that step — same-named commands win, unknown or model-only names keep the unknown-command hint.
 - A task panel projecting the agent's `todo_write` lists (`[✓]/[•]/[ ]`, `Ctrl+T` folds, rebuilt from the log on resume/fork).
 - A metered status line: `token 42.5/s` throughput, cumulative usage, and a context-occupancy ring that steps down the moment compaction lands.
 - A braille spinner with elapsed time while the agent runs; prompts typed while running queue FIFO and drain one per idle edge (slash commands are never queued).
 - Two layouts over one interaction kernel: `classic` (single column, `❯` prompt, bottom status line) and the opencode style (centered welcome for empty sessions, full-width conversation afterwards).
 - A full-screen task board (`dsh-taskboard`): `Ctrl+B` swaps the conversation for a board showing the task checklist, a draggable per-turn conversation timeline — the arrow keys or PageUp/PageDown select a turn and a content pane shows that turn's conversation, clamped to the terminal height with the newest messages first (clock span, your prompt, the assistant reply, tool calls, and output tokens), while `●` marks the live turn and `❯` the selected one — plus the live running elapsed time, queue depth, and the usage/context readouts; the same chord returns.
 - Composer history and session naming: the up/down arrows recall the prompts this process has sent (each session seeds the shared store with its own durable prompts), and `/title <text>` renames the session while bare `/title` opens an inline editor prefilled with the current durable title (Enter confirms, Esc cancels); `/title <text>` still renames directly — the status bar and `/sessions` follow the durable title event, and renames pin it against automatic retitling.
+### Common Commands & Descriptions
+
+Type `/` at the prompt to open the command palette, navigate with `↑` / `↓`, and press `Enter` to run:
+
+| Command | Arguments | Description |
+|---|---|---|
+| `/new` | none | Start and enter a fresh conversation session |
+| `/fork` | none | Fork a new session from the current turn, preserving past context |
+| `/sessions` | none | Open session picker to browse and switch between the 50 most recent sessions |
+| `/model` | `[provider/model]` | View current model; pass argument to switch model and fork session |
+| `/perm` | `[preset]` | View or set permission preset (`workspace-write` / `danger-full-access` / `ask`) |
+| `/connect` | none | Interactive wizard to configure provider connections (API key, base URL) |
+| `/title` | `[new-title]` | View or set session title; opens inline title editor when invoked without args |
+| `/skills` | `[query]` | Open skill picker to browse available skills; Enter stages `/<name> ` in prompt |
+| `/mcp` | `[query]` | View and execute tools from connected MCP servers |
+| `/help` | none | Show quick command list and keyboard shortcut help |
+| `/quit`, `/exit` | none | Exit the interactive CLI session |
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+B` | **Toggle Full-Screen TaskBoard**: View task checklist, turn timeline, tool calls, and execution times; press again to return |
+| `Ctrl+T` | Fold / unfold the active task checklist panel (TaskPanel) |
+| `Ctrl+R` | Expand / collapse reasoning thoughts on the latest assistant turn (when idle) |
+| `Ctrl+C` | Cancel the running turn immediately; exit if already idle |
+| `Ctrl+D` / `Ctrl+Q` | Quit the active CLI session |
+| `Ctrl+A` / `Home` | Move input cursor to the start of the line |
+| `Ctrl+E` / `End` | Move input cursor to the end of the line |
+| `←` / `→` | Move cursor horizontally for in-place text modification |
+| `Backspace` / `Delete` | Delete character before cursor with repeat key support |
+| `Del` | Forward-delete character under cursor |
+| `↑` / `↓` | Recall prompt history; navigate `/` command menu and pickers |
+
+### MCP Server Configuration Guide (User + AI)
+
+DeepSeek Harness natively supports standard Model Context Protocol (MCP) servers, compatible with Claude Code and Cursor ecosystems.
+
+#### 1. Configuration Scopes & Paths
+- **User scope**: `~/.dsh/mcp.json` (or `C:\Users\<user>\.dsh\mcp.json` on Windows), applied globally across all sessions.
+- **Project scope**: `<projectRoot>/.dsh/mcp.json`, scoped to the workspace directory and overriding user-level duplicates.
+
+#### 2. `mcp.json` Format
+Supports local `stdio` processes and remote `sse` / `streamable-http` transports:
+
+```json
+{
+  "mcpServers": {
+    "filesystem": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    },
+    "fetch": {
+      "command": "uvx",
+      "args": ["mcp-server-fetch"]
+    },
+    "remote-tools": {
+      "url": "https://mcp.example.com/sse",
+      "headers": {
+        "Authorization": "Bearer YOUR_API_TOKEN"
+      }
+    }
+  }
+}
+```
+
+#### 3. CLI Management Commands
+Manage servers directly with the `dsh mcp` CLI:
+```sh
+dsh mcp list                        # List configured MCP servers and tool discovery status
+dsh mcp add git --command "uvx" "mcp-server-git"  # Add a stdio MCP server
+dsh mcp add api --url "https://api.example.com/sse" # Add a remote SSE MCP server
+dsh mcp test git                    # Test server connectivity and list discovered tools
+dsh mcp remove git                  # Remove an MCP server
+```
+
+#### 4. Interaction and AI Workflow
+- **Interactive user invocation**: Type `/mcp` or `/mcp <query>` in the CLI to filter and pick tools.
+- **Autonomous AI invocation**: Active MCP servers are auto-synthesized as Cordis plugin instances. The agent discovers them via the tool protocol and invokes `mcp__<server>__<tool>` as needed.
+
+### Skills Library Configuration Guide (User + AI)
+
+Skills extend agent capabilities with tailored domain instructions and workflows.
+
+#### 1. Skills Locations
+- **User skills**: `~/.dsh/skills` (or `C:\Users\<user>\.dsh\skills`)
+- **Project skills**: `<projectRoot>/.dsh/skills`
+- **Shared agent skills**: `~/.agents/skills` and `<projectRoot>/.agents/skills`
+
+#### 2. Skill Format
+Supports flat `.md` files or directory bundles (`<skill-name>/SKILL.md`):
+
+**Example**: `~/.dsh/skills/git-commit-helper.md`
+```markdown
+---
+name: git-commit-helper
+description: Inspect git diff and craft conventional commit messages
+disable-model-invocation: false
+---
+
+# Git Commit Helper
+When asked to commit changes:
+1. Run git diff to inspect changes;
+2. Follow `<type>(<scope>): <subject>` conventions;
+3. Output a concise summary.
+```
+
+#### 3. Usage
+- **User invocation**: Type `/skills` or `/skills git` to filter. Selecting a skill stages `/<name> ` in prompt for guidance.
+- **Autonomous AI invocation**: Agents locate skills matching user tasks via `tool-skill` and inject `<skill_content>` dynamically.
 
 -----
 
@@ -80,6 +190,7 @@ Rendering follows Ink's `<Static>`: settled transcript rows are written once int
 | [`src/ui/state.ts`](src/ui/state.ts) | ViewModel: event wiring, actions, slash commands, running queue |
 | [`src/ui/status.ts`](src/ui/status.ts) | Status-line math: throughput, usage, context occupancy and ring |
 | [`src/ui/resize.ts`](src/ui/resize.ts) | Shrink-reflow erase correction (wraps `stdout.write`) |
+| [`src/ui/live-budget.ts`](src/ui/live-budget.ts) | Live-region row budget: the clip that keeps a frame under Ink's viewport-height reset |
 | [`src/ui/App.tsx`](src/ui/App.tsx) | Root layout: Static transcript + live region + input + docked panel |
 | [`tests/`](tests) | Unit tests (keyless, scripted agent) + REAL-composition + real-Ink reflow assertions |
 
@@ -124,6 +235,7 @@ Current constraints, registered honestly rather than silently:
 - **Reasoning fold**: collapsed to one line by default; `Ctrl+R` expands/collapses the latest entry.
 - **tool-call argument streaming preview**: transient preview on the streaming row; the landed card takes over.
 - **Untruncated transcript**: `state.messages` matches the durable log in length (one light object per row); settled static rows leave the React tree once written. `/clear` clears the current viewport and rebuilds the static list; terminal scrollback is kept.
+- **Streaming paint is viewport-clipped**: while a row is unsettled, the live region is trimmed to the rows the viewport leaves it (`src/ui/live-budget.ts`), because a frame that reaches `stdout.rows` makes Ink clear the screen, erase scrollback, and replay every committed row — the flash fast output produced. The row's full text prints once it settles into `<Static>`, and the durable log is never shortened.
 - **Tokens**: usage is re-accumulated from the durable log on resume; the first half of a streaming throughput reading is a character-density estimate, replaced when the provider usage arrives.
 - **Registry slash commands**: `/compact /goal /plan` execute through `ctx.commands` and print as ordinary visible rows; unregistered `/xxx` prints an unknown hint instead of being sent to the model.
 - **Input**: single-line input (backspace works); arrow-key editing and multi-line paste are not implemented.

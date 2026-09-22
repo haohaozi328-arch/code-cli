@@ -290,6 +290,33 @@ describe('App skill picker', () => {
     instance.unmount()
   })
 
+  it('opens the list already narrowed to the /skills argument', async () => {
+    const state = snapshot({
+      choicePicker: {
+        kind: 'skill',
+        title: COPY.choiceTitleSkills,
+        filter: 'other',
+        items: [
+          { label: '/deploy-checks', value: 'deploy-checks', description: 'Deploy checks' },
+          { label: '/other-skill', value: 'other-skill', description: 'Other skill' },
+        ],
+      },
+    })
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(state),
+      theme: THEMES['deep-forest'],
+      ui: 'classic',
+    }))
+    await new Promise(resolve => setTimeout(resolve, 10))
+    const frame = (instance.lastFrame() ?? '').replace(/\x1b\[[0-9;]*m/g, '')
+    expect(frame).toContain('/other-skill')
+    expect(frame).not.toContain('/deploy-checks')
+    // The seeded text rides the same footer a typed filter does.
+    expect(frame).toContain(`${COPY.choiceFilterPrefix}other`)
+    instance.unmount()
+  })
+
   it('Esc closes the picker and hands the keyboard back to the composer', async () => {
     const listeners = new Set<() => void>()
     let state = snapshot({

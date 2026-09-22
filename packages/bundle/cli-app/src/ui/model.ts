@@ -78,7 +78,7 @@ export interface CommandHint {
 }
 
 /** The action confirming a choice list performs. */
-export type ChoicePickerKind = 'model' | 'policy' | 'connect-provider' | 'connect-api' | 'skill'
+export type ChoicePickerKind = 'model' | 'policy' | 'connect-provider' | 'connect-api' | 'skill' | 'mcp'
 
 /** An open choice list (`/model`, `/perm`, `/connect`, `/skills`). */
 export interface ChoicePickerState {
@@ -88,6 +88,8 @@ export interface ChoicePickerState {
   items: ChoiceItem[]
   /** Placeholder line while the item list is still loading (empty `items`). */
   note?: string
+  /** Filter text the opener seeds into the picker's type-to-filter field. */
+  filter?: string
 }
 
 /** Context-window occupancy rendered by the composer's context ring. */
@@ -249,14 +251,26 @@ export interface ViewModel {
   pickModel: (spec: string) => void
   /** Open the permission-preset choice picker. */
   openPolicyPicker: () => void
-  /** Open the `/skills` choice picker (user-invocable skills from `ctx.skills`). */
-  openSkillPicker: () => void
+  /**
+   * Open the `/skills` choice picker (user-invocable skills from `ctx.skills`).
+   * @param filter - text the picker opens with already in its filter field.
+   */
+  openSkillPicker: (filter?: string) => void
   /**
    * Confirm a skill choice and close the picker. The renderer prefills the
    * composer with `/name ` so guidance text follows in the same draft; the
    * send path re-validates the token through the skill-command route.
    */
   pickSkill: (name: string) => void
+  /**
+   * Open the `/mcp` choice picker (available MCP tools from `ctx.tools`).
+   * @param filter - text the picker opens with already in its filter field.
+   */
+  openMcpPicker: (filter?: string) => void
+  /**
+   * Confirm an MCP tool choice and close the picker.
+   */
+  pickMcp: (name: string) => void
   /** Confirm a permission preset and apply both sandbox + approval controls. */
   pickPolicy: (policy: string) => void
   /** Open the provider `/connect` picker. */

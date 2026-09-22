@@ -39,6 +39,25 @@ pnpm dsh web
 ```
 
 `pnpm run build` prepares the repository artifacts. `pnpm dsh web` uses those built artifacts without rebuilding.
+### Terminal Interactive Interface (CLI TUI)
+
+Beyond the Web UI, DeepSeek Harness provides a full-featured terminal interactive interface (TUI):
+
+```sh
+pnpm dsh --profile cli
+```
+
+- **Slash Commands**: Type `/` to open the palette for `/new`, `/fork`, `/sessions`, `/model`, `/perm`, `/connect`, `/title`, `/skills`, `/mcp`, and more.
+- **Key Shortcuts**:
+  - `Ctrl+B`: **Toggle Full-Screen TaskBoard** to inspect task checklist, turn timeline, and execution metrics;
+  - `Ctrl+T`: Toggle task checklist panel;
+  - `Ctrl+R`: Expand / collapse reasoning thoughts;
+  - `Ctrl+C`: Cancel running turn, or exit when idle;
+  - `←` / `→`: Navigate cursor for inline prompt editing;
+  - `Backspace` / `Delete`: Delete characters with continuous repeat support.
+- **MCP & Skills Integration**:
+  - **MCP**: Supports user scope `~/.dsh/mcp.json` and project scope `<project>/.dsh/mcp.json`. Manage via `dsh mcp add/list/test` or trigger in terminal via `/mcp`. Active tools are also autonomously available to the agent.
+  - **Skills**: Placed in `~/.dsh/skills` or `<project>/.dsh/skills`. Stage skills with `/skills` or let agents auto-load them.
 
 ## Community and support
 

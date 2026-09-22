@@ -897,15 +897,23 @@ describe('createViewModel approval', () => {
       expect(vm.getState().choicePicker).toBeNull()
     })
 
-    it('rejects /skills with an argument and closes the picker on pickSkill', async () => {
+    it('opens the picker narrowed to the /skills argument, and closes it on pickSkill', async () => {
       const { vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
-      vm.send('/skills deploy-checks')
-      expect(vm.getState().error).toBe(COPY.skillsUsage)
-      vm.send('/skills')
+      vm.send('/skills deploy')
+      expect(vm.getState().error).toBeNull()
+      expect(vm.getState().choicePicker).toMatchObject({ kind: 'skill', items: [], filter: 'deploy' })
       await new Promise(resolve => setTimeout(resolve, 0))
-      expect(vm.getState().choicePicker).not.toBeNull()
+      // The settled catalog swaps into the same frame: the opening filter outlives it.
+      expect(vm.getState().choicePicker).toMatchObject({ filter: 'deploy', items: [{ label: '/deploy-checks' }] })
       vm.pickSkill('deploy-checks')
       expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('leaves a bare /skills picker unfiltered', async () => {
+      const { vm } = await benchSkills({ skills: [skill('deploy-checks', 'Deploy checks')] })
+      vm.send('/skills')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().choicePicker?.filter).toBeUndefined()
     })
 
     it('routes a skill line with guidance to the agent verbatim, not to the model-catalog tool', async () => {
@@ -960,6 +968,86 @@ describe('createViewModel approval', () => {
       await new Promise(resolve => setTimeout(resolve, 0))
       expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'assistant', text: 'ran:go' })
       expect(followup).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('mcp invocation', () => {
+    interface McpBench {
+      ctx: Context
+      agent: Agent
+      vm: ViewModel
+      followup: ReturnType<typeof vi.fn>
+    }
+
+    async function benchMcp(options: { tools?: Array<{ name: string; description?: string }> } = {}): Promise<McpBench> {
+      const ctx = new Context()
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(CommandRuntime)
+      disposers.push(() => { void ctx.fiber.dispose() })
+      const session = ctx.sessions.create(SessionId(`vm-mcp-${Math.random().toString(36).slice(2)}`))
+      const followup = vi.fn()
+      const agent = {
+        id: session.id, options: { provider: 'p', model: 'm' }, session, ctx,
+        status: 'idle', cancel: () => {}, followup,
+        whenIdle: () => Promise.resolve(),
+      } as unknown as Agent
+      const toolsMap = new Map((options.tools ?? []).map(t => [t.name, t]))
+      ctx.provide('tools', {
+        schemas: () => (options.tools ?? []).map(t => ({ name: t.name, description: t.description, parameters: {} })),
+        get: (name: string) => toolsMap.get(name),
+      })
+      const vm = createViewModel({ ctx, agent, session, sessionLabel: 'mcp', catalog: [], approvalBus: createApprovalBus() })
+      register(vm)
+      return { ctx, agent, vm, followup }
+    }
+
+    it('opens the mcp picker on /mcp, listing active mcp tools', async () => {
+      const { vm } = await benchMcp({
+        tools: [
+          { name: 'mcp__weather__get_forecast', description: 'Get weather forecast' },
+          { name: 'mcp__github__create_issue', description: 'Create GitHub issue' },
+          { name: 'native_bash', description: 'Run bash' },
+        ],
+      })
+      vm.send('/mcp')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      const picker = vm.getState().choicePicker
+      expect(picker).toMatchObject({ kind: 'mcp', title: COPY.choiceTitleMcp })
+      expect(picker?.items.map(item => item.label)).toEqual(['/mcp__weather__get_forecast', '/mcp__github__create_issue'])
+      expect(picker?.items.map(item => item.description)).toEqual(['[weather] Get weather forecast', '[github] Create GitHub issue'])
+    })
+
+    it('reports unavailable notice when no MCP tools exist', async () => {
+      const { vm } = await benchMcp({ tools: [{ name: 'native_bash', description: 'Run bash' }] })
+      vm.send('/mcp')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(vm.getState().messages.at(-1)).toMatchObject({ role: 'assistant', text: COPY.mcpUnavailable })
+      expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('opens the picker narrowed to the /mcp argument and closes on pickMcp', async () => {
+      const { vm } = await benchMcp({
+        tools: [
+          { name: 'mcp__weather__get_forecast', description: 'Get weather forecast' },
+          { name: 'mcp__github__create_issue', description: 'Create GitHub issue' },
+        ],
+      })
+      vm.send('/mcp weather')
+      expect(vm.getState().choicePicker).toMatchObject({ kind: 'mcp', filter: 'weather' })
+      vm.pickMcp('mcp__weather__get_forecast')
+      expect(vm.getState().choicePicker).toBeNull()
+    })
+
+    it('routes a direct /mcp__tool call with args to the agent', async () => {
+      const { vm, followup } = await benchMcp({
+        tools: [{ name: 'mcp__weather__get_forecast', description: 'Weather' }],
+      })
+      vm.send('/mcp__weather__get_forecast Beijing')
+      await new Promise(resolve => setTimeout(resolve, 0))
+      expect(followup).toHaveBeenCalledTimes(1)
+      expect((followup.mock.calls[0]?.[0] as UserMessage).content).toEqual([
+        { type: 'text', text: '请调用 MCP 工具 `mcp__weather__get_forecast`，参数如下：\nBeijing' },
+      ])
     })
   })
 
