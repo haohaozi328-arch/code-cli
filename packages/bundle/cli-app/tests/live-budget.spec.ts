@@ -151,7 +151,7 @@ describe('fitLiveMessages', () => {
  * controls and erase prefixes removed. */
 function paintedFrame(stdout: FakeStdout): string {
   const frames = stdout.written
-    .map(chunk => {
+    .map((chunk) => {
       const index = chunk.lastIndexOf('\u001b[G')
       return index === -1 ? chunk : chunk.slice(index + '\u001b[G'.length)
     })
@@ -234,6 +234,8 @@ function viewModel(state: UiState): ViewModel {
     pickPolicy: noop,
     openSkillPicker: noop,
     pickSkill: noop,
+    openMcpPicker: noop,
+    pickMcp: noop,
     openConnectPicker: noop,
     pickConnectProvider: noop,
     submitConnectInput: noop,

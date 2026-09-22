@@ -5,7 +5,7 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { App } from '../src/ui/index.ts'
 import { COMMAND_HINTS } from '../src/ui/state.ts'
 import { THEMES } from '../src/ui/theme.ts'
-import type { UiState, ViewModel } from '../src/ui/model.ts'
+import type { ExitRequest, UiState, ViewModel } from '../src/ui/model.ts'
 
 function snapshot(overrides: Partial<UiState> = {}): UiState {
   return {
@@ -38,6 +38,44 @@ function stripAnsi(text: string): string {
   return text.replace(/\x1b\[[0-9;]*m/g, '')
 }
 
+/** A view model that never notifies, renders a fixed snapshot, and records sends. */
+function viewModel(state: UiState, send: (text: string) => void): ViewModel {
+  const noop = (): void => {}
+  return {
+    subscribe: () => noop,
+    getState: () => state,
+    send,
+    historyOlder: () => null,
+    historyNewer: () => null,
+    openTitleEditor: noop,
+    submitTitle: noop,
+    cancelTitleEditor: noop,
+    stop: noop,
+    toggleBoard: noop,
+    quit: noop,
+    openPicker: noop,
+    closePicker: noop,
+    requestSwitch: noop,
+    openModelPicker: noop,
+    pickModel: noop,
+    openPolicyPicker: noop,
+    pickPolicy: noop,
+    openSkillPicker: noop,
+    pickSkill: noop,
+    openMcpPicker: noop,
+    pickMcp: noop,
+    openConnectPicker: noop,
+    pickConnectProvider: noop,
+    submitConnectInput: noop,
+    pickConnectApi: noop,
+    cancelConnect: noop,
+    closeChoicePicker: noop,
+    resolveApproval: noop,
+    done: new Promise<ExitRequest>(() => {}),
+    dispose: noop,
+  }
+}
+
 describe('command menu and cursor editing', () => {
   it('COMMAND_HINTS includes /mcp and removes /plan /clear /goal', () => {
     const names = COMMAND_HINTS.map(h => h.name)
@@ -50,11 +88,7 @@ describe('command menu and cursor editing', () => {
   it('renders command menu with all matches accessible from /', async () => {
     const state = snapshot({})
     const send = vi.fn()
-    const vm: ViewModel = {
-      subscribe: () => () => {},
-      getState: () => state,
-      send,
-    }
+    const vm = viewModel(state, send)
 
     const instance = render(React.createElement(App, { key: 'test-cmd', vm, theme: THEMES['deep-forest'], ui: 'classic' }))
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -86,11 +120,7 @@ describe('command menu and cursor editing', () => {
   it('supports cursor navigation and middle editing', async () => {
     const state = snapshot({})
     const send = vi.fn()
-    const vm: ViewModel = {
-      subscribe: () => () => {},
-      getState: () => state,
-      send,
-    }
+    const vm = viewModel(state, send)
 
     const instance = render(React.createElement(App, { key: 'test-cursor', vm, theme: THEMES['deep-forest'], ui: 'classic' }))
     await new Promise(resolve => setTimeout(resolve, 20))
@@ -100,7 +130,7 @@ describe('command menu and cursor editing', () => {
     instance.stdin.write('c')
     await new Promise(resolve => setTimeout(resolve, 20))
 
-    let frame = stripAnsi(instance.lastFrame() ?? '')
+    const frame = stripAnsi(instance.lastFrame() ?? '')
     expect(frame).toContain('ac')
 
     // Left arrow to move between 'a' and 'c'
@@ -122,11 +152,7 @@ describe('command menu and cursor editing', () => {
   it('continuously deletes backward with Backspace/Delete key without moving left', async () => {
     const state = snapshot({})
     const send = vi.fn()
-    const vm: ViewModel = {
-      subscribe: () => () => {},
-      getState: () => state,
-      send,
-    }
+    const vm = viewModel(state, send)
 
     const instance = render(React.createElement(App, { key: 'test-bs', vm, theme: THEMES['deep-forest'], ui: 'classic' }))
     await new Promise(resolve => setTimeout(resolve, 20))
