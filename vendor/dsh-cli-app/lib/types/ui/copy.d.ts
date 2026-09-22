@@ -33,10 +33,12 @@ export declare const COPY: {
     readonly choiceTitleConnectProvider: "connect provider";
     readonly choiceTitleConnectApi: "connect api";
     readonly choiceTitleSkills: "skills";
+    readonly choiceTitleMcp: "mcp tools";
     readonly skillsUnavailable: "技能服务未挂载，无法列出技能";
     readonly skillsFailedPrefix: "/skills 失败：";
-    readonly skillsUsage: "用法：/skills（打开技能列表）";
     readonly skillLoading: "扫描技能列表…";
+    readonly mcpUnavailable: "当前会话未检测到挂载的 MCP 工具（可在 .dsh/mcp.json 中配置服务）";
+    readonly mcpLoading: "扫描 MCP 服务与工具…";
     readonly policyAsk: "ask — 每次敏感工具先询问";
     readonly policyNever: "never — 拒绝所有敏感工具";
     readonly customProvider: "自定义模型商";
@@ -82,6 +84,8 @@ export declare const COPY: {
     readonly errorGlyph: "⚠";
     readonly defaultToolGlyph: "⚙";
     readonly toolResultTruncated: "输出已折叠（完整结果仍保留）";
+    readonly liveTailMore: "…还有";
+    readonly liveTailRest: "行未显示 · 全文随回合结束打印";
     readonly inputNewlineMark: " ↵ ";
     readonly connectDone: "已连接模型商 {provider}，现在可使用 /model {provider}/模型ID 切换模型。";
 };

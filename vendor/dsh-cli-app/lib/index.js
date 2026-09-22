@@ -93,10 +93,12 @@ const COPY = {
 	choiceTitleConnectProvider: "connect provider",
 	choiceTitleConnectApi: "connect api",
 	choiceTitleSkills: "skills",
+	choiceTitleMcp: "mcp tools",
 	skillsUnavailable: "技能服务未挂载，无法列出技能",
 	skillsFailedPrefix: "/skills 失败：",
-	skillsUsage: "用法：/skills（打开技能列表）",
 	skillLoading: "扫描技能列表…",
+	mcpUnavailable: "当前会话未检测到挂载的 MCP 工具（可在 .dsh/mcp.json 中配置服务）",
+	mcpLoading: "扫描 MCP 服务与工具…",
 	policyAsk: "ask — 每次敏感工具先询问",
 	policyNever: "never — 拒绝所有敏感工具",
 	customProvider: "自定义模型商",
@@ -142,6 +144,8 @@ const COPY = {
 	errorGlyph: "⚠",
 	defaultToolGlyph: "⚙",
 	toolResultTruncated: "输出已折叠（完整结果仍保留）",
+	liveTailMore: "…还有",
+	liveTailRest: "行未显示 · 全文随回合结束打印",
 	inputNewlineMark: " ↵ ",
 	connectDone: "已连接模型商 {provider}，现在可使用 /model {provider}/模型ID 切换模型。"
 };
@@ -165,7 +169,6 @@ const HELP_TEXT = [
 	`${PRODUCT} — DeepSeek 交互式终端`,
 	"",
 	"  /help             查看帮助",
-	"  /clear            清空当前显示内容",
 	"  /new              新建会话",
 	"  /fork             从当前会话创建分支",
 	"  /sessions         选择并打开历史会话",
@@ -173,8 +176,8 @@ const HELP_TEXT = [
 	"  /perm             设置权限预设（沙箱 + 审批）",
 	"  /connect          连接模型商（主流 + 自定义）",
 	"  /title            重命名当前会话",
-	"  /skills           选择并调用一个技能（skill）",
-	"  /compact /goal /plan             上下文、目标与计划命令",
+	"  /skills [筛选词]  选择并调用一个技能（skill）· 参数即列表筛选",
+	"  /mcp [筛选词]     查看与选择 MCP 工具 · 参数即列表筛选",
 	"  /quit, /exit      退出会话（也可使用 Ctrl+D）",
 	"  Ctrl+T            折叠或展开任务面板",
 	"  Ctrl+B            切换任务进程时间看板（dsh-taskboard）",
@@ -1882,17 +1885,23 @@ function createViewModel(options) {
 		setChoicePicker(null);
 		notify();
 	};
-	/** Open the `/skills` list: the user-invocable skills this session's composition exposes. */
-	const openSkillPicker = () => {
+	/**
+	* Open the `/skills` list: the user-invocable skills this session's
+	* composition exposes, optionally narrowed by the text the command carried.
+	* @param filter - initial filter for the picker's type-to-filter field.
+	*/
+	const openSkillPicker = (filter = "") => {
 		if (skillRegistry === void 0) {
 			appendNotice(COPY.skillsUnavailable);
 			return;
 		}
+		const seeded = filter === "" ? {} : { filter };
 		setChoicePicker({
 			kind: "skill",
 			title: COPY.choiceTitleSkills,
 			items: [],
-			note: COPY.skillLoading
+			note: COPY.skillLoading,
+			...seeded
 		});
 		const loadEpoch = choiceEpoch;
 		skillRegistry.list({
@@ -1916,12 +1925,47 @@ function createViewModel(options) {
 			setChoicePicker({
 				kind: "skill",
 				title: COPY.choiceTitleSkills,
-				items
+				items,
+				...seeded
 			});
 		}).catch((failure) => {
 			if (choiceEpoch !== loadEpoch) return;
 			setChoicePicker(null);
 			appendNotice(`${COPY.skillsFailedPrefix}${renderError(failure)}`);
+		});
+	};
+	/**
+	* Open the `/mcp` list: all MCP tools this session's composition exposes
+	* (prefixed with `mcp__`), optionally narrowed by the text the command carried.
+	* @param filter - initial filter for the picker's type-to-filter field.
+	*/
+	const openMcpPicker = (filter = "") => {
+		const toolsService = ctx.get("tools");
+		if (toolsService === void 0 || typeof toolsService.schemas !== "function") {
+			appendNotice(COPY.mcpUnavailable);
+			return;
+		}
+		const seeded = filter === "" ? {} : { filter };
+		const mcpSchemas = (toolsService.schemas(agent) ?? []).filter((s) => s.name.startsWith("mcp__"));
+		if (mcpSchemas.length === 0) {
+			appendNotice(COPY.mcpUnavailable);
+			return;
+		}
+		const items = mcpSchemas.map((schema) => {
+			const serverName = schema.name.split("__")[1] ?? "mcp";
+			const description = (schema.description || "").replace(/\s+/g, " ").trim();
+			return {
+				label: `/${schema.name}`,
+				value: schema.name,
+				description: `[${serverName}] ${description}`.trim()
+			};
+		});
+		setChoicePicker({
+			kind: "mcp",
+			title: COPY.choiceTitleMcp,
+			items,
+			note: `${items.length} 个 MCP 工具可用`,
+			...seeded
 		});
 	};
 	const connect = new ConnectController(ctx, {
@@ -1976,6 +2020,14 @@ function createViewModel(options) {
 		if (commands !== void 0 && commands.find(agent, bare) !== void 0) {
 			dispatchRegistryCommand(name, line);
 			return;
+		}
+		if (bare.startsWith("mcp__")) {
+			const toolsService = ctx.get("tools");
+			if (toolsService !== void 0 && typeof toolsService.get === "function" && toolsService.get(bare, agent) !== void 0) {
+				const args = line.slice(name.length).trim();
+				submitOrQueue(args !== "" ? `请调用 MCP 工具 \`${bare}\`，参数如下：\n${args}` : `请调用 MCP 工具 \`${bare}\`。`, line);
+				return;
+			}
 		}
 		if (skillRegistry === void 0) {
 			setError(`unknown command: ${name}; try /help`);
@@ -2040,8 +2092,10 @@ function createViewModel(options) {
 				else openPolicyPicker();
 				return;
 			case "/skills":
-				if (rest !== "") setError(COPY.skillsUsage);
-				else openSkillPicker();
+				openSkillPicker(rest);
+				return;
+			case "/mcp":
+				openMcpPicker(rest);
 				return;
 			case "/connect":
 				if (rest !== "") connect.start(rest);
@@ -2324,6 +2378,10 @@ function createViewModel(options) {
 		pickSkill(name) {
 			setChoicePicker(null);
 		},
+		openMcpPicker,
+		pickMcp(name) {
+			setChoicePicker(null);
+		},
 		openConnectPicker() {
 			connect.openPicker();
 		},
@@ -2400,19 +2458,13 @@ const COMMAND_HINTS = [
 	},
 	{
 		name: "/skills",
-		hint: "选择并调用技能"
+		hint: "选择并调用技能",
+		arg: "筛选词"
 	},
 	{
-		name: "/goal",
-		hint: "管理会话目标"
-	},
-	{
-		name: "/plan",
-		hint: "进入计划模式"
-	},
-	{
-		name: "/clear",
-		hint: "清空当前显示"
+		name: "/mcp",
+		hint: "查看与使用 MCP 工具",
+		arg: "筛选词"
 	},
 	{
 		name: "/quit",
@@ -2420,310 +2472,6 @@ const COMMAND_HINTS = [
 		arg: "或 /exit"
 	}
 ];
-//#endregion
-//#region lib/types/ui/overlays.js
-/** Marker preceding the highlighted row of a list. */
-const SELECT_MARKER = "›";
-/** Cap the picker's label column so a long name cannot starve its description. */
-const MAX_CHOICE_LABEL_COLUMN = 24;
-/** Rows a picker shows before it scrolls its viewport. */
-const SESSION_PICKER_ROWS = 5;
-/** Rows a choice list shows before it scrolls its viewport. */
-const CHOICE_PICKER_ROWS = 8;
-/** Scroll window for a bounded list, centered on the selection. */
-function windowStart(length, selected, visible) {
-	if (length <= visible) return 0;
-	return Math.max(0, Math.min(selected - Math.floor(visible / 2), length - visible));
-}
-/** One row of the resume picker. */
-function SessionRow(props) {
-	const { item, selected, theme } = props;
-	const stem = item.title ?? item.sessionId;
-	const where = shortCwd(item.cwd);
-	const time = formatWhen(item.updatedAt);
-	return jsxs(Text, {
-		color: selected ? theme.brand : theme.muted,
-		bold: selected,
-		children: [
-			selected ? `${SELECT_MARKER} ` : "  ",
-			stem,
-			where !== "" ? `  ·  ${where}` : "",
-			jsxs(Text, {
-				dimColor: true,
-				children: [
-					"  ·  ",
-					time,
-					item.parentSession !== null ? "  ·  fork" : ""
-				]
-			})
-		]
-	});
-}
-/** Compact modal session picker with an inline search field. */
-function SessionPicker(props) {
-	const { items, selected, search, theme } = props;
-	const start = windowStart(items.length, selected, SESSION_PICKER_ROWS);
-	const visible = items.slice(start, start + SESSION_PICKER_ROWS);
-	return jsxs(Box, {
-		flexDirection: "column",
-		width: "100%",
-		borderStyle: "round",
-		borderColor: theme.brand,
-		paddingX: 1,
-		children: [
-			jsxs(Box, { children: [jsx(Text, {
-				color: theme.brand,
-				bold: true,
-				children: COPY.sessionsTitle
-			}), jsxs(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: ["  ", COPY.sessionsHint]
-			})] }),
-			jsxs(Box, {
-				marginTop: 1,
-				children: [
-					jsx(Text, {
-						color: theme.brand,
-						children: "/ "
-					}),
-					jsx(Text, {
-						color: search === "" ? theme.muted : theme.text,
-						dimColor: search === "",
-						children: search === "" ? COPY.sessionsSearchPlaceholder : search
-					}),
-					jsx(Text, {
-						color: theme.brand,
-						children: "▌"
-					})
-				]
-			}),
-			jsxs(Box, {
-				flexDirection: "column",
-				marginTop: 1,
-				children: [visible.length === 0 && jsx(Text, {
-					color: theme.muted,
-					dimColor: true,
-					children: COPY.sessionsEmpty
-				}), visible.map((item, index) => jsx(SessionRow, {
-					item,
-					selected: start + index === selected,
-					theme
-				}, item.sessionId))]
-			}),
-			items.length > SESSION_PICKER_ROWS && jsxs(Box, {
-				marginTop: 1,
-				justifyContent: "space-between",
-				children: [jsxs(Text, {
-					color: theme.muted,
-					dimColor: true,
-					children: [
-						start + 1,
-						"-",
-						Math.min(start + SESSION_PICKER_ROWS, items.length),
-						" / ",
-						items.length
-					]
-				}), jsx(Text, {
-					color: theme.muted,
-					dimColor: true,
-					children: COPY.sessionsSearchNote
-				})]
-			})
-		]
-	});
-}
-/** Generic bounded choice list used by `/model`, `/perm`, `/connect`, and `/skills`. */
-function ChoiceList(props) {
-	const { title, items, selected, theme, note, search } = props;
-	const start = windowStart(items.length, selected, CHOICE_PICKER_ROWS);
-	const visible = items.slice(start, start + CHOICE_PICKER_ROWS);
-	const described = visible.filter((item) => item.description !== void 0);
-	const labelWidth = described.length === 0 ? 0 : Math.min(MAX_CHOICE_LABEL_COLUMN, Math.max(...described.map((item) => item.label.length)));
-	return jsxs(Box, {
-		flexDirection: "column",
-		borderStyle: "round",
-		borderColor: theme.brand,
-		marginBottom: 1,
-		children: [
-			jsxs(Box, {
-				marginLeft: 1,
-				marginTop: 1,
-				children: [jsx(Text, {
-					color: theme.brand,
-					bold: true,
-					children: title
-				}), jsxs(Text, {
-					color: theme.muted,
-					children: ["  ·  ", COPY.choiceHint]
-				})]
-			}),
-			items.length === 0 && jsxs(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: ["  ", note ?? (search === "" ? COPY.choiceEmpty : COPY.choiceSearchEmpty)]
-			}),
-			visible.map((item, index) => {
-				const actual = start + index;
-				return jsxs(Text, {
-					wrap: "truncate-end",
-					color: selected === actual ? theme.brand : theme.muted,
-					bold: selected === actual,
-					children: [
-						selected === actual ? `${SELECT_MARKER} ` : "  ",
-						item.description === void 0 ? item.label : item.label.padEnd(labelWidth),
-						item.description !== void 0 && jsxs(Text, {
-							dimColor: true,
-							children: ["  ", item.description]
-						})
-					]
-				}, item.value);
-			}),
-			(items.length > CHOICE_PICKER_ROWS || search !== "") && jsxs(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: [
-					"  ",
-					items.length === 0 ? 0 : start + 1,
-					"-",
-					Math.min(start + CHOICE_PICKER_ROWS, items.length),
-					" / ",
-					items.length,
-					"  ·  ",
-					search === "" ? COPY.choiceSearchNote : `${COPY.choiceFilterPrefix}${search}`
-				]
-			})
-		]
-	});
-}
-/** Tool-approval question: the pending tool and its key choices. */
-function ApprovalModal(props) {
-	const { prompt, theme } = props;
-	if (prompt === null) return jsx(Box, {});
-	return jsxs(Box, {
-		flexDirection: "column",
-		borderStyle: "double",
-		borderColor: theme.warn,
-		marginBottom: 1,
-		children: [
-			jsxs(Box, {
-				marginLeft: 1,
-				marginTop: 1,
-				children: [jsx(Text, {
-					color: theme.warn,
-					bold: true,
-					children: COPY.approvalTitle
-				}), prompt.reason !== void 0 && jsxs(Text, {
-					color: theme.muted,
-					children: ["  ·  ", prompt.reason]
-				})]
-			}),
-			jsx(Box, {
-				marginLeft: 1,
-				marginBottom: 1,
-				children: jsx(Text, {
-					color: theme.text,
-					children: prompt.toolName
-				})
-			}),
-			jsx(Box, {
-				marginLeft: 1,
-				marginBottom: 1,
-				children: jsx(Text, {
-					color: theme.muted,
-					dimColor: true,
-					children: COPY.approvalHint
-				})
-			})
-		]
-	});
-}
-/** Slash-command palette shown while the input starts with `/`. */
-function CommandMenu(props) {
-	const { matches, selected, theme } = props;
-	return jsxs(Box, {
-		flexDirection: "column",
-		marginTop: 1,
-		children: [jsx(Text, {
-			color: theme.muted,
-			dimColor: true,
-			children: COPY.commandsHint
-		}), matches.map((candidate, index) => jsxs(Text, {
-			color: index === selected ? theme.brand : theme.muted,
-			bold: index === selected,
-			children: [
-				index === selected ? `${SELECT_MARKER} ` : "  ",
-				candidate.name,
-				jsxs(Text, {
-					dimColor: true,
-					children: [
-						"  ",
-						candidate.hint,
-						candidate.arg !== void 0 ? `  ·  ${candidate.arg}` : ""
-					]
-				})
-			]
-		}, candidate.name))]
-	});
-}
-/** Prompt panel for the `/connect` wizard. */
-function ConnectPrompt(props) {
-	const { wizard, theme } = props;
-	return jsxs(Box, {
-		flexDirection: "column",
-		borderStyle: "round",
-		borderColor: theme.brand,
-		marginBottom: 1,
-		paddingX: 1,
-		children: [
-			jsx(Text, {
-				color: theme.brand,
-				bold: true,
-				children: "/connect"
-			}),
-			jsx(Text, {
-				color: theme.text,
-				children: connectPrompt(wizard.step, wizard.provider)
-			}),
-			jsx(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: "Enter 确认 · Esc 取消"
-			})
-		]
-	});
-}
-/** The /title editor: one text field over the shared composer buffer. */
-function TitlePrompt(props) {
-	const { current, theme } = props;
-	return jsxs(Box, {
-		flexDirection: "column",
-		borderStyle: "round",
-		borderColor: theme.brand,
-		marginBottom: 1,
-		paddingX: 1,
-		children: [
-			jsx(Text, {
-				color: theme.brand,
-				bold: true,
-				children: "/title"
-			}),
-			jsxs(Text, {
-				color: theme.text,
-				children: [
-					COPY.titleCurrent,
-					"：",
-					current ?? "（未命名）"
-				]
-			}),
-			jsx(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: COPY.titleEditorHint
-			})
-		]
-	});
-}
 //#endregion
 //#region lib/types/ui/markdown.js
 /**
@@ -3082,717 +2830,6 @@ function MessageRow(props) {
 	});
 }
 //#endregion
-//#region lib/types/ui/App.js
-/**
-* Ink application root for the dsh terminal session.
-*
-* Two layout chromes share one view model and one keyboard contract:
-*   - `classic`   the original single-column terminal look.
-*   - `opencode`  an opencode-style frame: a centered welcome page for an empty
-*     session, then a left-aligned transcript once a conversation begins.
-*
-* The transcript is split between Ink's `<Static>` output and the live region.
-* Committed rows are written once and stay in the terminal's own scrollback, so
-* resizing or scrolling never repaints them; only the streaming row, the modal
-* overlays, and the input line are redrawn. That split is what keeps the app
-* correct on resize and gives the terminal native mouse-wheel scrolling.
-* @module @dsh-external/dsh-cli-app/ui/App
-*/
-/** Widest the opencode welcome column grows before the terminal keeps the rest as side air. */
-const OPENCODE_COLUMN = 104;
-/** Keep a large paste from turning the prompt into a multi-screen repaint; the full buffer is preserved. */
-const INPUT_PREVIEW_LIMIT = 240;
-/** Colours of the welcome wordmark, one per glyph. */
-const WORDMARK_COLORS = [
-	"#9BE800",
-	"#A9EA1A",
-	"#B9EC43",
-	"#C9E98A"
-];
-/** Collapse a multi-line buffer into the single prompt line. */
-function previewInput(value) {
-	const compact = value.replace(/\r?\n/g, COPY.inputNewlineMark);
-	if (compact.length <= INPUT_PREVIEW_LIMIT) return compact;
-	return `${compact.slice(0, INPUT_PREVIEW_LIMIT)}…`;
-}
-/** Follow terminal size: width drives the centered column, rows drive the welcome offset. */
-function useTerminalDims() {
-	const { stdout } = useStdout();
-	const [columns, setColumns] = useState(stdout.columns);
-	const [rows, setRows] = useState(stdout.rows);
-	useEffect(() => {
-		const onResize = () => {
-			setColumns(stdout.columns);
-			setRows(stdout.rows);
-		};
-		stdout.on("resize", onResize);
-		return () => {
-			stdout.off("resize", onResize);
-		};
-	}, [stdout]);
-	return {
-		columns,
-		rows
-	};
-}
-/** Milliseconds the current turn has run; ticks on the spinner interval while active. */
-function useRunningClock(active) {
-	const [elapsedMs, setElapsedMs] = useState(0);
-	const startedAtRef = useRef(0);
-	useEffect(() => {
-		if (!active) {
-			setElapsedMs(0);
-			return;
-		}
-		startedAtRef.current = Date.now();
-		const timer = setInterval(() => {
-			setElapsedMs(Date.now() - startedAtRef.current);
-		}, 80);
-		return () => {
-			clearInterval(timer);
-		};
-	}, [active]);
-	return elapsedMs;
-}
-/** Centered-column width for the opencode welcome page. */
-function columnWidthFor(columns) {
-	if (columns <= 46) return Math.max(1, columns);
-	return Math.min(OPENCODE_COLUMN, columns - 2);
-}
-/** Clamp a list cursor onto its current item count. */
-function clampIndex(index, length) {
-	return Math.min(index, Math.max(0, length - 1));
-}
-/** Bottom status line for the classic layout. */
-function StatusBar(props) {
-	const { state, theme, elapsedMs } = props;
-	return jsxs(Box, {
-		justifyContent: "space-between",
-		children: [jsxs(Text, {
-			color: theme.muted,
-			dimColor: true,
-			children: [
-				state.running ? jsxs(Text, {
-					color: theme.warn,
-					children: [
-						spinnerFrame(elapsedMs),
-						" ",
-						COPY.statusRunning,
-						" · ",
-						formatElapsed(elapsedMs)
-					]
-				}) : jsx(Text, {
-					color: theme.ok,
-					children: COPY.statusIdle
-				}),
-				" · ",
-				state.modelLabel,
-				" · ",
-				state.sessionLabel,
-				jsx(ContextRing, {
-					state,
-					theme
-				})
-			]
-		}), jsx(TokenUsageLine, {
-			state,
-			theme
-		})]
-	});
-}
-/** Inline context-window readout: ring fraction plus occupancy, or nothing before a window is known. */
-function ContextRing(props) {
-	const { state, theme } = props;
-	const occupancy = state.contextOccupancy;
-	if (occupancy === null) return null;
-	const band = contextBand(occupancy.percent);
-	const color = band === "ok" ? theme.ok : band === "warn" ? theme.warn : theme.error;
-	return jsxs(Text, {
-		color: theme.muted,
-		dimColor: true,
-		children: [
-			" · ",
-			COPY.contextLabel,
-			" ",
-			jsxs(Text, {
-				color,
-				children: [
-					contextRing(occupancy.percent),
-					" ",
-					occupancy.percent,
-					"%"
-				]
-			})
-		]
-	});
-}
-/** Generation throughput and cumulative usage for the current session. */
-function TokenUsageLine(props) {
-	const { state, theme } = props;
-	return jsxs(Text, {
-		color: theme.muted,
-		dimColor: true,
-		children: [
-			COPY.tokenRateLabel,
-			" ",
-			formatTokenRate(state.tokenRate),
-			COPY.tokenRateUnit,
-			" · ",
-			COPY.tokenUsageLabel,
-			" ",
-			formatTokenCount(state.tokens.input + state.tokens.output)
-		]
-	});
-}
-/** App root: static transcript, live region, modals, and the input line. */
-function App(props) {
-	const { vm, theme, ui = "classic" } = props;
-	const chrome = ui;
-	const state = useSyncExternalStore(vm.subscribe, vm.getState);
-	const [input, setInput] = useState("");
-	const [pickerIndex, setPickerIndex] = useState(0);
-	const [sessionSearch, setSessionSearch] = useState("");
-	const [commandIndex, setCommandIndex] = useState(0);
-	const [choiceIndex, setChoiceIndex] = useState(0);
-	const [choiceSearch, setChoiceSearch] = useState("");
-	const [expandedReasoning, setExpandedReasoning] = useState(null);
-	const [todosCollapsed, setTodosCollapsed] = useState(false);
-	const [boardCursor, setBoardCursor] = useState(-1);
-	const [panePage, setPanePage] = useState(0);
-	const pickerOpen = state.pickerOpen;
-	const choicePicker = state.choicePicker;
-	const connectWizard = state.connectWizard;
-	const titleEditor = state.titleEditor;
-	const pendingApproval = state.pendingApproval;
-	const running = state.running;
-	const elapsedMs = useRunningClock(running);
-	const { columns, rows } = useTerminalDims();
-	const columnWidth = columnWidthFor(columns);
-	const { committed, live } = useMemo(() => splitTranscript(state.messages), [state.messages]);
-	const filteredSessions = useMemo(() => {
-		const query = sessionSearch.trim().toLowerCase();
-		if (query === "") return state.pickerItems;
-		return state.pickerItems.filter((item) => [
-			item.title ?? "",
-			item.cwd ?? "",
-			item.sessionId
-		].some((value) => value.toLowerCase().includes(query)));
-	}, [state.pickerItems, sessionSearch]);
-	const safePickerIndex = clampIndex(pickerIndex, filteredSessions.length);
-	const commandQuery = input.startsWith("/") ? input.toLowerCase() : null;
-	const commandMatches = useMemo(() => commandQuery === null ? [] : COMMAND_HINTS.filter((candidate) => candidate.name.startsWith(commandQuery)).slice(0, 8), [commandQuery]);
-	const commandMenuOpen = commandQuery !== null && commandMatches.length > 0;
-	const effectiveCommandIndex = clampIndex(commandIndex, commandMatches.length);
-	const filteredChoices = useMemo(() => {
-		if (choicePicker === null) return [];
-		const query = choiceSearch.trim().toLowerCase();
-		if (query === "") return choicePicker.items;
-		return choicePicker.items.filter((item) => item.label.toLowerCase().includes(query) || (item.description?.toLowerCase().includes(query) ?? false));
-	}, [choicePicker, choiceSearch]);
-	const effectiveChoiceIndex = filteredChoices.length === 0 ? 0 : clampIndex(choiceIndex, filteredChoices.length);
-	useEffect(() => {
-		if (pickerOpen) {
-			setPickerIndex(0);
-			setSessionSearch("");
-		}
-	}, [pickerOpen]);
-	const choicePickerWasNull = useRef(true);
-	useEffect(() => {
-		if (choicePicker !== null && choicePickerWasNull.current) {
-			setChoiceIndex(0);
-			setChoiceSearch("");
-		}
-		choicePickerWasNull.current = choicePicker === null;
-	}, [choicePicker]);
-	useEffect(() => {
-		if (state.boardOpen) {
-			setBoardCursor(-1);
-			setPanePage(0);
-		}
-	}, [state.boardOpen]);
-	useEffect(() => {
-		setPanePage(0);
-	}, [boardCursor]);
-	useEffect(() => {
-		setCommandIndex(0);
-	}, [input]);
-	useInput((chunk, key) => {
-		const lower = chunk.toLowerCase();
-		if (isBoardToggle(lower, key)) {
-			vm.toggleBoard();
-			return;
-		}
-		if (state.boardOpen) {
-			if (key.upArrow || key.downArrow) {
-				setBoardCursor((prev) => stepTimelineCursor(prev, state.turnTimeline.length, key));
-				return;
-			}
-			if (key.pageUp || key.pageDown) {
-				setBoardCursor((prev) => {
-					const length = state.turnTimeline.length;
-					const current = prev === -1 ? length - 1 : Math.min(prev, length - 1);
-					const next = key.pageUp ? current - 5 : current + 5;
-					if (next >= length - 1) return -1;
-					return Math.max(0, next);
-				});
-				return;
-			}
-			if (key.leftArrow || key.rightArrow) {
-				setPanePage((prev) => key.leftArrow ? Math.min(prev + 1, 999) : Math.max(0, prev - 1));
-				return;
-			}
-			return;
-		}
-		if (pendingApproval !== null) {
-			if (lower === "a") vm.resolveApproval("allowed-once");
-			else if (lower === "r") vm.resolveApproval("rejected");
-			else if (key.escape || lower === "c") vm.resolveApproval("cancelled");
-			return;
-		}
-		if (pickerOpen) {
-			const count = filteredSessions.length;
-			if (key.upArrow) {
-				setPickerIndex((prev) => count === 0 ? 0 : (prev - 1 + count) % count);
-				return;
-			}
-			if (key.downArrow) {
-				setPickerIndex((prev) => count === 0 ? 0 : (prev + 1) % count);
-				return;
-			}
-			if (key.return) {
-				const item = filteredSessions[safePickerIndex];
-				if (item !== void 0) vm.requestSwitch(item.sessionId);
-				return;
-			}
-			if (key.escape || key.ctrl && lower === "c") {
-				vm.closePicker();
-				return;
-			}
-			if (key.backspace || key.delete) {
-				setSessionSearch((prev) => prev.slice(0, -1));
-				setPickerIndex(0);
-				return;
-			}
-			if (chunk !== "" && !key.ctrl && !key.meta) {
-				setSessionSearch((prev) => prev + chunk);
-				setPickerIndex(0);
-			}
-			return;
-		}
-		if (choicePicker !== null) {
-			const count = filteredChoices.length;
-			if (key.upArrow) {
-				setChoiceIndex((prev) => count === 0 ? 0 : (prev - 1 + count) % count);
-				return;
-			}
-			if (key.downArrow) {
-				setChoiceIndex((prev) => count === 0 ? 0 : (prev + 1) % count);
-				return;
-			}
-			if (key.return) {
-				const item = filteredChoices[effectiveChoiceIndex];
-				if (item !== void 0) switch (choicePicker.kind) {
-					case "model":
-						vm.pickModel(item.value);
-						setInput("");
-						break;
-					case "policy":
-						vm.pickPolicy(item.value);
-						setInput("");
-						break;
-					case "connect-provider":
-						vm.pickConnectProvider(item.value);
-						setInput("");
-						break;
-					case "connect-api":
-						vm.pickConnectApi(item.value);
-						setInput("");
-						break;
-					case "skill":
-						vm.pickSkill(item.value);
-						setInput(`/${item.value} `);
-						break;
-					default: assertNever(choicePicker.kind);
-				}
-				return;
-			}
-			if (key.escape || key.ctrl && lower === "c") {
-				vm.closeChoicePicker();
-				setInput("");
-				return;
-			}
-			if (key.backspace || key.delete) {
-				setChoiceSearch((prev) => prev.slice(0, -1));
-				setChoiceIndex(0);
-				return;
-			}
-			if (chunk !== "" && !key.ctrl && !key.meta) {
-				setChoiceSearch((prev) => prev + chunk);
-				setChoiceIndex(0);
-			}
-			return;
-		}
-		if (connectWizard !== null) {
-			if (key.return) {
-				vm.submitConnectInput(input);
-				setInput("");
-				return;
-			}
-			if (key.escape || key.ctrl && lower === "c") {
-				vm.cancelConnect();
-				setInput("");
-				return;
-			}
-			if (key.backspace || key.delete) {
-				setInput((prev) => prev.slice(0, -1));
-				return;
-			}
-			if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return;
-			if (chunk !== "" && !key.ctrl && !key.meta) setInput((prev) => prev + chunk);
-			return;
-		}
-		if (titleEditor !== null) {
-			if (key.return) {
-				vm.submitTitle(input);
-				setInput("");
-				return;
-			}
-			if (key.escape || key.ctrl && lower === "c") {
-				vm.cancelTitleEditor();
-				setInput("");
-				return;
-			}
-			if (key.backspace || key.delete) {
-				setInput((prev) => prev.slice(0, -1));
-				return;
-			}
-			if (key.upArrow || key.downArrow || key.leftArrow || key.rightArrow || key.tab) return;
-			if (chunk !== "" && !key.ctrl && !key.meta) setInput((prev) => prev + chunk);
-			return;
-		}
-		if (commandMenuOpen) {
-			if (key.upArrow) {
-				setCommandIndex((prev) => (prev - 1 + commandMatches.length) % commandMatches.length);
-				return;
-			}
-			if (key.downArrow) {
-				setCommandIndex((prev) => (prev + 1) % commandMatches.length);
-				return;
-			}
-			if (key.return) {
-				const chosen = commandMatches[effectiveCommandIndex];
-				if (chosen !== void 0) {
-					const line = input.trimEnd();
-					setInput("");
-					vm.send(chosen.name + (line.length > chosen.name.length ? line.slice(chosen.name.length) : ""));
-				}
-				return;
-			}
-			if (key.escape || key.ctrl && lower === "c") {
-				setInput("");
-				return;
-			}
-			if (key.backspace || key.delete) {
-				setInput((prev) => prev.slice(0, -1));
-				return;
-			}
-			if (chunk !== "" && !key.ctrl && !key.meta) setInput((prev) => prev + chunk);
-			return;
-		}
-		if (key.ctrl && lower === "c") {
-			if (running) vm.stop();
-			else vm.quit();
-			return;
-		}
-		if (key.ctrl && (lower === "d" || lower === "q")) {
-			vm.quit();
-			return;
-		}
-		if (key.ctrl && lower === "t" && !key.meta) {
-			setTodosCollapsed((prev) => !prev);
-			return;
-		}
-		if (key.return) {
-			const line = input.trimEnd();
-			setInput("");
-			if (line !== "") vm.send(line);
-			return;
-		}
-		if (!running && input === "" && key.ctrl && lower === "r" && !key.meta) {
-			const lastReasoned = [...state.messages].reverse().find((message) => message.role === "assistant" && message.reasoning !== "" && message.status === "done");
-			if (lastReasoned !== void 0) setExpandedReasoning((prev) => prev === lastReasoned.key ? null : lastReasoned.key);
-			return;
-		}
-		if (key.backspace || key.delete) {
-			setInput((prev) => prev.slice(0, -1));
-			return;
-		}
-		if (key.upArrow || key.downArrow) {
-			const recalled = key.upArrow ? vm.historyOlder(input) : vm.historyNewer(input);
-			if (recalled !== null) setInput(recalled);
-			return;
-		}
-		if (key.escape || key.tab || key.leftArrow || key.rightArrow) return;
-		if (chunk !== "" && !key.ctrl && !key.meta) setInput((prev) => prev + chunk);
-	});
-	const renderRow = (message) => jsx(MessageRow, {
-		message,
-		theme,
-		reasoningExpanded: expandedReasoning === message.key,
-		chrome
-	}, message.key);
-	const staticList = jsx(Static, {
-		items: committed,
-		children: renderRow
-	}, `${state.sessionId}:${state.transcriptEpoch}`);
-	const liveList = jsx(Box, {
-		flexDirection: "column",
-		children: live.map(renderRow)
-	});
-	const overlays = jsxs(Fragment, { children: [
-		state.error !== null && jsx(Box, {
-			marginBottom: 1,
-			children: jsxs(Text, {
-				color: theme.error,
-				children: [
-					COPY.errorGlyph,
-					" ",
-					state.error
-				]
-			})
-		}),
-		jsx(ApprovalModal, {
-			prompt: pendingApproval,
-			theme
-		}),
-		connectWizard !== null && jsx(ConnectPrompt, {
-			wizard: connectWizard,
-			theme
-		}),
-		titleEditor !== null && jsx(TitlePrompt, {
-			current: titleEditor,
-			theme
-		}),
-		choicePicker !== null && jsx(ChoiceList, {
-			title: choicePicker.title,
-			items: filteredChoices,
-			selected: effectiveChoiceIndex,
-			theme,
-			note: choicePicker.note,
-			search: choiceSearch
-		}),
-		commandMenuOpen && jsx(CommandMenu, {
-			matches: commandMatches,
-			selected: effectiveCommandIndex,
-			theme
-		})
-	] });
-	const todos = state.todos;
-	const todosVisible = todos !== null && todos.length > 0 && todos.some((todo) => todo.status !== "completed") && !todosCollapsed;
-	const queuedNote = state.queued.length > 0 && jsx(Box, {
-		marginBottom: 1,
-		children: jsxs(Text, {
-			color: theme.muted,
-			dimColor: true,
-			children: [
-				COPY.queuedLabel,
-				" ",
-				state.queued.length,
-				" · ",
-				collapseFirstLine(state.queued[state.queued.length - 1] ?? "", 48)
-			]
-		})
-	});
-	const classicInput = jsxs(Box, {
-		marginTop: 1,
-		children: [
-			jsx(Text, {
-				color: theme.brand,
-				children: "❯ "
-			}),
-			input === "" ? jsx(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: COPY.classicInputPlaceholder
-			}) : jsx(Text, {
-				color: theme.text,
-				children: previewInput(input)
-			}),
-			jsx(Text, {
-				color: theme.brand,
-				children: running || input !== "" ? "" : "▌"
-			})
-		]
-	});
-	const opencodeComposer = jsxs(Fragment, { children: [jsxs(Box, {
-		borderStyle: "round",
-		borderColor: theme.brand,
-		marginTop: 1,
-		paddingX: 1,
-		flexDirection: "column",
-		children: [jsxs(Box, { children: [
-			jsx(Text, {
-				color: theme.brand,
-				children: "> "
-			}),
-			input === "" ? jsx(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: connectWizard !== null || titleEditor !== null ? "" : COPY.composerPlaceholder
-			}) : jsx(Text, {
-				color: theme.text,
-				children: previewInput(input)
-			}),
-			jsx(Text, {
-				color: theme.brand,
-				children: input === "" && !running ? "▌" : ""
-			})
-		] }), jsxs(Box, {
-			marginTop: 1,
-			justifyContent: "space-between",
-			children: [jsxs(Text, {
-				color: theme.muted,
-				dimColor: true,
-				children: [
-					state.modelLabel,
-					" · ",
-					COPY.permissionLabel,
-					" ",
-					jsx(Text, {
-						color: theme.brand,
-						children: state.permissionPreset
-					}),
-					jsx(ContextRing, {
-						state,
-						theme
-					})
-				]
-			}), jsx(Text, {
-				color: running ? theme.warn : theme.ok,
-				children: running ? `${spinnerFrame(elapsedMs)} ${COPY.statusRunning} · ${formatElapsed(elapsedMs)}` : COPY.statusIdle
-			})]
-		})]
-	}), jsx(Box, {
-		marginTop: 1,
-		justifyContent: "flex-end",
-		children: jsx(TokenUsageLine, {
-			state,
-			theme
-		})
-	})] });
-	if (state.boardOpen) return jsxs(Box, {
-		flexDirection: "column",
-		children: [staticList, jsx(TaskBoard, {
-			state,
-			theme,
-			elapsedMs,
-			cursor: boardCursor,
-			panePage,
-			rows,
-			columns
-		})]
-	});
-	if (chrome === "opencode") {
-		if (pickerOpen) return jsxs(Box, {
-			width: "100%",
-			height: Math.max(8, rows - 2),
-			alignItems: "center",
-			justifyContent: "center",
-			children: [staticList, jsx(Box, {
-				width: Math.min(columnWidth, 78),
-				children: jsx(SessionPicker, {
-					items: filteredSessions,
-					selected: safePickerIndex,
-					search: sessionSearch,
-					theme
-				})
-			})]
-		});
-		if (committed.length === 0 && live.length === 0) return jsxs(Box, {
-			flexDirection: "column",
-			width: "100%",
-			marginTop: Math.max(0, Math.floor((rows - 10) / 2)),
-			children: [staticList, jsx(Box, {
-				width: "100%",
-				justifyContent: "center",
-				children: jsxs(Box, {
-					width: columnWidth,
-					flexDirection: "column",
-					children: [
-						jsx(Box, {
-							justifyContent: "center",
-							children: WORDMARK.map((glyph, index) => jsx(Text, {
-								color: WORDMARK_COLORS[index] ?? theme.brand,
-								bold: true,
-								children: glyph
-							}, glyph))
-						}),
-						jsxs(Box, {
-							justifyContent: "center",
-							marginTop: 1,
-							children: [jsx(Text, {
-								color: theme.text,
-								children: "DeepSeek "
-							}), jsx(Text, {
-								color: theme.brand,
-								bold: true,
-								children: COPY.welcomeTagline
-							})]
-						}),
-						overlays,
-						todosVisible && jsx(TaskPanel, {
-							todos,
-							theme
-						}),
-						queuedNote,
-						opencodeComposer
-					]
-				})
-			})]
-		});
-		return jsxs(Box, {
-			flexDirection: "column",
-			width: "100%",
-			children: [
-				staticList,
-				liveList,
-				overlays,
-				todosVisible && jsx(TaskPanel, {
-					todos,
-					theme
-				}),
-				queuedNote,
-				opencodeComposer
-			]
-		});
-	}
-	return jsxs(Box, {
-		flexDirection: "column",
-		children: [
-			staticList,
-			liveList,
-			pickerOpen && jsx(SessionPicker, {
-				items: filteredSessions,
-				selected: safePickerIndex,
-				search: sessionSearch,
-				theme
-			}),
-			overlays,
-			todosVisible && jsx(TaskPanel, {
-				todos,
-				theme
-			}),
-			queuedNote,
-			classicInput,
-			jsx(StatusBar, {
-				state,
-				theme,
-				elapsedMs
-			})
-		]
-	});
-}
-//#endregion
 //#region lib/types/ui/terminal.js
 /**
 * Terminal control sequences the app emits directly. Ink owns layout and cursor
@@ -3977,6 +3014,1389 @@ function installResizeReflow(stdout) {
 		if (stdout.write === installed) stdout.write = originalWrite;
 		stdout.off("resize", onResize);
 	} };
+}
+//#endregion
+//#region lib/types/ui/live-budget.js
+/**
+* Live-region row budget: the ceiling that keeps a streaming answer out of Ink's
+* whole-screen reset.
+*
+* Before painting, Ink compares the frame's height with the viewport
+* (`ink/build/ink.js`: `if (outputHeight >= stdout.rows)`), and a frame that
+* reaches the viewport is not erased and repainted row for row: the screen is
+* cleared, the terminal's scrollback is erased, and every committed row
+* replays. While an answer streams, the live region crosses that line on one
+* chunk and falls back under it on the next, which is the flash a fast output
+* produces.
+*
+* The correction stays on this side of Ink: the live region is measured here
+* and clipped to the rows the mounted chrome leaves it, so the threshold is
+* never reached and every repaint stays a frame diff. Clipping is paint-time
+* only — the row's full text prints once when it settles into `<Static>`, and
+* the durable log never sees the shortened copy.
+* @module @dsh-external/dsh-cli-app/ui/live-budget
+*/
+/** Viewport rows below which clipping cannot help: the chrome fills the screen by itself. */
+const MIN_VIEWPORT_ROWS = 12;
+/** Rows the live region keeps even when the chrome claims more than the viewport holds. */
+const LIVE_MIN_ROWS = 3;
+/** Ink resets at `outputHeight >= rows`, so a safe frame stops one row short of the viewport. */
+const SPARE_ROWS = 1;
+/** Rows a transcript row adds around its text: its blank row below, and one row of slack for a fenced block's language header and the indent the text wraps inside. */
+const ROW_OVERHEAD = 2;
+/** Row the classic chrome prints above a user or assistant row. */
+const ROLE_LABEL_ROWS = 1;
+/** Row the clip notice adds. */
+const NOTICE_ROWS = 1;
+/** Rows of the newest answer the clip never takes away, so the frame always shows a line of it. */
+const MIN_TEXT_ROWS = 1;
+/**
+* Rows the pieces mounted outside the live region occupy, counted from each
+* component's own markup. A bounded list counts its maximum, because that is
+* the height the frame can reach. An under-estimate lets one frame trip Ink's
+* reset; an over-estimate clips a row of answer early.
+*/
+const LIVE_CHROME = {
+	/** The classic input line and the margin above it. */
+	classicInput: 2,
+	/** The classic bottom status line. */
+	statusLine: 1,
+	/** The framed opencode composer with its status row and margins, plus the token line. */
+	opencodeComposer: 8,
+	/** An error row and its margin. */
+	error: 2,
+	/** The tool-approval modal. */
+	approval: 5,
+	/** `SessionPicker`: heading, search field, five rows, and a footer. */
+	sessionPicker: 10,
+	/** `ChoiceList`: heading, eight rows, and a footer. */
+	choicePicker: 11,
+	/** `CommandMenu`: hint line and up to eight matches. */
+	commandMenu: 9,
+	/** The `/connect` and `/title` frames. */
+	prompt: 4,
+	/** The task panel frame, title, and hint; each todo adds one row. */
+	todoPanel: 4,
+	/** The queued-prompts note and its margin. */
+	queued: 2
+};
+/**
+* Rows the live region may occupy.
+* @param rows - viewport height in rows; non-finite when the stream reports none.
+* @param chromeRows - rows the pieces mounted outside the live region take.
+* @returns the row budget, or 0 when the live region must paint everything.
+*/
+function liveRowBudget(rows, chromeRows) {
+	if (!Number.isFinite(rows) || rows < MIN_VIEWPORT_ROWS) return 0;
+	return Math.max(LIVE_MIN_ROWS, rows - chromeRows - SPARE_ROWS);
+}
+/** Physical rows a text block occupies once the terminal wraps it. */
+function textRows(text, shape) {
+	if (text === "") return 0;
+	if (!Number.isFinite(shape.columns) || shape.columns <= 0) return text.split("\n").length;
+	let rows = 0;
+	for (const line of text.split("\n")) rows += wrappedRows(line, shape.columns);
+	return rows;
+}
+/**
+* Physical rows one live transcript row paints.
+* @param message - the row, settled or unsettled.
+* @param shape - width, label, and reasoning-fold inputs.
+* @returns the row's height in viewport rows.
+*/
+function liveRowHeight(message, shape) {
+	let rows = ROW_OVERHEAD + textRows(message.text, shape);
+	if (shape.labeled && message.role !== "tool") rows += ROLE_LABEL_ROWS;
+	if (message.status !== "streaming" && message.reasoning !== "") rows += shape.expandedKey === message.key ? textRows(message.reasoning, shape) : 1;
+	if (message.toolPreview !== void 0 && message.toolPreview !== "") rows += 1;
+	if (message.toolStatus === "done" || message.toolStatus === "error") rows += textRows(message.toolResult === void 0 ? "" : previewToolResult(message.toolResult), shape);
+	return rows;
+}
+/**
+* The tail of `text` that fits `rows` physical rows.
+* @param text - the row's answer text.
+* @param rows - rows the clip left for it, at least one.
+* @param shape - width the terminal wraps at.
+* @returns the kept lines joined; the newest line survives even when it alone is taller.
+*/
+function tailToFit(text, rows, shape) {
+	const lines = text.split("\n");
+	const wraps = Number.isFinite(shape.columns) && shape.columns > 0;
+	const heightOf = (line) => wraps ? wrappedRows(line, shape.columns) : 1;
+	let start = lines.length - 1;
+	let used = heightOf(lines[start] ?? "");
+	while (start > 0) {
+		const above = heightOf(lines[start - 1] ?? "");
+		if (used + above > rows) break;
+		start -= 1;
+		used += above;
+	}
+	return lines.slice(start).join("\n");
+}
+/**
+* Clip the live region to `budget` rows, keeping the newest tail. The newest
+* row's text gives up its leading lines first, because dropping a whole row is
+* the more visible loss; head rows go only when one answer line no longer fits
+* beside them.
+* @param messages - the live rows, transcript order.
+* @param budget - rows the live region may occupy, 0 to paint everything.
+* @param shape - width, label, and reasoning-fold inputs.
+* @returns the rows to paint, the rows left out, and whether the notice fits.
+*/
+function fitLiveMessages(messages, budget, shape) {
+	const rows = messages.map((message) => {
+		return {
+			message,
+			text: textRows(message.text, shape),
+			height: liveRowHeight(message, shape)
+		};
+	});
+	const total = rows.reduce((sum, row) => sum + row.height, 0);
+	const newest = rows.at(-1);
+	if (newest === void 0 || budget <= 0 || total <= budget) return {
+		messages,
+		hiddenRows: 0,
+		notice: false
+	};
+	const usable = Math.max(1, budget - NOTICE_ROWS);
+	const overhead = newest.height - newest.text;
+	const head = rows.slice(0, -1);
+	let kept = head;
+	let headRows = total - newest.height;
+	if (newest.text - (total - usable) < MIN_TEXT_ROWS) {
+		const limit = usable - overhead - MIN_TEXT_ROWS;
+		headRows = 0;
+		kept = [];
+		for (const row of [...head].reverse()) {
+			if (headRows + row.height > limit) break;
+			headRows += row.height;
+			kept.push(row);
+		}
+		kept.reverse();
+	}
+	const keep = Math.max(MIN_TEXT_ROWS, usable - headRows - overhead);
+	const tail = keep >= newest.text ? newest.message.text : tailToFit(newest.message.text, keep, shape);
+	const clipped = tail === newest.message.text ? void 0 : {
+		...newest.message,
+		text: tail
+	};
+	const painted = headRows + overhead + textRows(clipped === void 0 ? newest.message.text : clipped.text, shape);
+	return {
+		messages: clipped === void 0 && kept === head ? messages : [...kept.map((row) => row.message), clipped ?? newest.message],
+		hiddenRows: total - painted,
+		notice: painted + NOTICE_ROWS <= budget
+	};
+}
+//#endregion
+//#region lib/types/ui/overlays.js
+/** Marker preceding the highlighted row of a list. */
+const SELECT_MARKER = "›";
+/** Cap the picker's label column so a long name cannot starve its description. */
+const MAX_CHOICE_LABEL_COLUMN = 24;
+/** Rows a picker shows before it scrolls its viewport. */
+const SESSION_PICKER_ROWS = 5;
+/** Rows a choice list shows before it scrolls its viewport. */
+const CHOICE_PICKER_ROWS = 8;
+/** Scroll window for a bounded list, centered on the selection. */
+function windowStart(length, selected, visible) {
+	if (length <= visible) return 0;
+	return Math.max(0, Math.min(selected - Math.floor(visible / 2), length - visible));
+}
+/** One row of the resume picker. */
+function SessionRow(props) {
+	const { item, selected, theme } = props;
+	const stem = item.title ?? item.sessionId;
+	const where = shortCwd(item.cwd);
+	const time = formatWhen(item.updatedAt);
+	return jsxs(Text, {
+		color: selected ? theme.brand : theme.muted,
+		bold: selected,
+		children: [
+			selected ? `${SELECT_MARKER} ` : "  ",
+			stem,
+			where !== "" ? `  ·  ${where}` : "",
+			jsxs(Text, {
+				dimColor: true,
+				children: [
+					"  ·  ",
+					time,
+					item.parentSession !== null ? "  ·  fork" : ""
+				]
+			})
+		]
+	});
+}
+/** Compact modal session picker with an inline search field. */
+function SessionPicker(props) {
+	const { items, selected, search, theme } = props;
+	const start = windowStart(items.length, selected, SESSION_PICKER_ROWS);
+	const visible = items.slice(start, start + SESSION_PICKER_ROWS);
+	return jsxs(Box, {
+		flexDirection: "column",
+		width: "100%",
+		borderStyle: "round",
+		borderColor: theme.brand,
+		paddingX: 1,
+		children: [
+			jsxs(Box, { children: [jsx(Text, {
+				color: theme.brand,
+				bold: true,
+				children: COPY.sessionsTitle
+			}), jsxs(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: ["  ", COPY.sessionsHint]
+			})] }),
+			jsxs(Box, {
+				marginTop: 1,
+				children: [
+					jsx(Text, {
+						color: theme.brand,
+						children: "/ "
+					}),
+					jsx(Text, {
+						color: search === "" ? theme.muted : theme.text,
+						dimColor: search === "",
+						children: search === "" ? COPY.sessionsSearchPlaceholder : search
+					}),
+					jsx(Text, {
+						color: theme.brand,
+						children: "▌"
+					})
+				]
+			}),
+			jsxs(Box, {
+				flexDirection: "column",
+				marginTop: 1,
+				children: [visible.length === 0 && jsx(Text, {
+					color: theme.muted,
+					dimColor: true,
+					children: COPY.sessionsEmpty
+				}), visible.map((item, index) => jsx(SessionRow, {
+					item,
+					selected: start + index === selected,
+					theme
+				}, item.sessionId))]
+			}),
+			items.length > SESSION_PICKER_ROWS && jsxs(Box, {
+				marginTop: 1,
+				justifyContent: "space-between",
+				children: [jsxs(Text, {
+					color: theme.muted,
+					dimColor: true,
+					children: [
+						start + 1,
+						"-",
+						Math.min(start + SESSION_PICKER_ROWS, items.length),
+						" / ",
+						items.length
+					]
+				}), jsx(Text, {
+					color: theme.muted,
+					dimColor: true,
+					children: COPY.sessionsSearchNote
+				})]
+			})
+		]
+	});
+}
+/** Generic bounded choice list used by `/model`, `/perm`, `/connect`, and `/skills`. */
+function ChoiceList(props) {
+	const { title, items, selected, theme, note, search } = props;
+	const start = windowStart(items.length, selected, CHOICE_PICKER_ROWS);
+	const visible = items.slice(start, start + CHOICE_PICKER_ROWS);
+	const described = visible.filter((item) => item.description !== void 0);
+	const labelWidth = described.length === 0 ? 0 : Math.min(MAX_CHOICE_LABEL_COLUMN, Math.max(...described.map((item) => item.label.length)));
+	return jsxs(Box, {
+		flexDirection: "column",
+		borderStyle: "round",
+		borderColor: theme.brand,
+		marginBottom: 1,
+		children: [
+			jsxs(Box, {
+				marginLeft: 1,
+				marginTop: 1,
+				children: [jsx(Text, {
+					color: theme.brand,
+					bold: true,
+					children: title
+				}), jsxs(Text, {
+					color: theme.muted,
+					children: ["  ·  ", COPY.choiceHint]
+				})]
+			}),
+			items.length === 0 && jsxs(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: ["  ", note ?? (search === "" ? COPY.choiceEmpty : COPY.choiceSearchEmpty)]
+			}),
+			visible.map((item, index) => {
+				const actual = start + index;
+				return jsxs(Text, {
+					wrap: "truncate-end",
+					color: selected === actual ? theme.brand : theme.muted,
+					bold: selected === actual,
+					children: [
+						selected === actual ? `${SELECT_MARKER} ` : "  ",
+						item.description === void 0 ? item.label : item.label.padEnd(labelWidth),
+						item.description !== void 0 && jsxs(Text, {
+							dimColor: true,
+							children: ["  ", item.description]
+						})
+					]
+				}, item.value);
+			}),
+			(items.length > CHOICE_PICKER_ROWS || search !== "") && jsxs(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: [
+					"  ",
+					items.length === 0 ? 0 : start + 1,
+					"-",
+					Math.min(start + CHOICE_PICKER_ROWS, items.length),
+					" / ",
+					items.length,
+					"  ·  ",
+					search === "" ? COPY.choiceSearchNote : `${COPY.choiceFilterPrefix}${search}`
+				]
+			})
+		]
+	});
+}
+/** Tool-approval question: the pending tool and its key choices. */
+function ApprovalModal(props) {
+	const { prompt, theme } = props;
+	if (prompt === null) return jsx(Box, {});
+	return jsxs(Box, {
+		flexDirection: "column",
+		borderStyle: "double",
+		borderColor: theme.warn,
+		marginBottom: 1,
+		children: [
+			jsxs(Box, {
+				marginLeft: 1,
+				marginTop: 1,
+				children: [jsx(Text, {
+					color: theme.warn,
+					bold: true,
+					children: COPY.approvalTitle
+				}), prompt.reason !== void 0 && jsxs(Text, {
+					color: theme.muted,
+					children: ["  ·  ", prompt.reason]
+				})]
+			}),
+			jsx(Box, {
+				marginLeft: 1,
+				marginBottom: 1,
+				children: jsx(Text, {
+					color: theme.text,
+					children: prompt.toolName
+				})
+			}),
+			jsx(Box, {
+				marginLeft: 1,
+				marginBottom: 1,
+				children: jsx(Text, {
+					color: theme.muted,
+					dimColor: true,
+					children: COPY.approvalHint
+				})
+			})
+		]
+	});
+}
+/** Slash-command palette shown while the input starts with `/`. */
+function CommandMenu(props) {
+	const { matches, selected, theme } = props;
+	const maxVisible = 8;
+	let start = 0;
+	if (matches.length > maxVisible) start = Math.max(0, Math.min(selected - Math.floor(maxVisible / 2), matches.length - maxVisible));
+	const visibleMatches = matches.slice(start, start + maxVisible);
+	return jsxs(Box, {
+		flexDirection: "column",
+		marginTop: 1,
+		children: [jsx(Text, {
+			color: theme.muted,
+			dimColor: true,
+			children: COPY.commandsHint
+		}), visibleMatches.map((candidate, i) => {
+			const isSelected = start + i === selected;
+			return jsxs(Text, {
+				color: isSelected ? theme.brand : theme.muted,
+				bold: isSelected,
+				children: [
+					isSelected ? `${SELECT_MARKER} ` : "  ",
+					candidate.name,
+					jsxs(Text, {
+						dimColor: true,
+						children: [
+							"  ",
+							candidate.hint,
+							candidate.arg !== void 0 ? `  ·  ${candidate.arg}` : ""
+						]
+					})
+				]
+			}, candidate.name);
+		})]
+	});
+}
+/** Prompt panel for the `/connect` wizard. */
+function ConnectPrompt(props) {
+	const { wizard, theme } = props;
+	return jsxs(Box, {
+		flexDirection: "column",
+		borderStyle: "round",
+		borderColor: theme.brand,
+		marginBottom: 1,
+		paddingX: 1,
+		children: [
+			jsx(Text, {
+				color: theme.brand,
+				bold: true,
+				children: "/connect"
+			}),
+			jsx(Text, {
+				color: theme.text,
+				children: connectPrompt(wizard.step, wizard.provider)
+			}),
+			jsx(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: "Enter 确认 · Esc 取消"
+			})
+		]
+	});
+}
+/** The /title editor: one text field over the shared composer buffer. */
+function TitlePrompt(props) {
+	const { current, theme } = props;
+	return jsxs(Box, {
+		flexDirection: "column",
+		borderStyle: "round",
+		borderColor: theme.brand,
+		marginBottom: 1,
+		paddingX: 1,
+		children: [
+			jsx(Text, {
+				color: theme.brand,
+				bold: true,
+				children: "/title"
+			}),
+			jsxs(Text, {
+				color: theme.text,
+				children: [
+					COPY.titleCurrent,
+					"：",
+					current ?? "（未命名）"
+				]
+			}),
+			jsx(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: COPY.titleEditorHint
+			})
+		]
+	});
+}
+//#endregion
+//#region lib/types/ui/App.js
+/**
+* Ink application root for the dsh terminal session.
+*
+* Two layout chromes share one view model and one keyboard contract:
+*   - `classic`   the original single-column terminal look.
+*   - `opencode`  an opencode-style frame: a centered welcome page for an empty
+*     session, then a left-aligned transcript once a conversation begins.
+*
+* The transcript is split between Ink's `<Static>` output and the live region.
+* Committed rows are written once and stay in the terminal's own scrollback, so
+* resizing or scrolling never repaints them; only the streaming row, the modal
+* overlays, and the input line are redrawn. That split is what keeps the app
+* correct on resize and gives the terminal native mouse-wheel scrolling.
+* @module @dsh-external/dsh-cli-app/ui/App
+*/
+/** Widest the opencode welcome column grows before the terminal keeps the rest as side air. */
+const OPENCODE_COLUMN = 104;
+/** Keep a large paste from turning the prompt into a multi-screen repaint; the full buffer is preserved. */
+const INPUT_PREVIEW_LIMIT = 240;
+/** Colours of the welcome wordmark, one per glyph. */
+const WORDMARK_COLORS = [
+	"#9BE800",
+	"#A9EA1A",
+	"#B9EC43",
+	"#C9E98A"
+];
+/** Collapse a multi-line buffer into the single prompt line. */
+function previewInput(value) {
+	const compact = value.replace(/\r?\n/g, COPY.inputNewlineMark);
+	if (compact.length <= INPUT_PREVIEW_LIMIT) return compact;
+	return `${compact.slice(0, INPUT_PREVIEW_LIMIT)}…`;
+}
+/** Detect whether a keypress is Backspace across platforms (macOS delete, xterm DEL, etc.). */
+function isBackspaceKey(chunk, key) {
+	return Boolean(key.backspace || chunk === "\b" || chunk === "" || key.delete && chunk !== "\x1B[3~");
+}
+/** Detect whether a keypress is forward Delete (PC Del key, etc.). */
+function isForwardDeleteKey(chunk, key) {
+	return Boolean(key.delete && chunk === "\x1B[3~");
+}
+/** Render prompt input with an interactive cursor pointer. */
+function renderInputWithCursor(text, cursor, theme, running, placeholder) {
+	if (text === "") return jsxs(Fragment, { children: [placeholder !== void 0 ? jsx(Text, {
+		color: theme.muted,
+		dimColor: true,
+		children: placeholder
+	}) : null, !running && jsx(Text, {
+		color: theme.brand,
+		children: "▌"
+	})] });
+	const clamped = Math.min(Math.max(0, cursor), text.length);
+	if (clamped >= text.length) return jsxs(Fragment, { children: [jsx(Text, {
+		color: theme.text,
+		children: previewInput(text)
+	}), jsx(Text, {
+		color: theme.brand,
+		children: "▌"
+	})] });
+	const before = previewInput(text.slice(0, clamped));
+	const under = previewInput(text.slice(clamped, clamped + 1)) || " ";
+	const after = previewInput(text.slice(clamped + 1));
+	return jsxs(Fragment, { children: [
+		jsx(Text, {
+			color: theme.text,
+			children: before
+		}),
+		jsx(Text, {
+			inverse: true,
+			bold: true,
+			color: theme.brand,
+			children: under
+		}),
+		jsx(Text, {
+			color: theme.text,
+			children: after
+		})
+	] });
+}
+/** Follow terminal size: width drives the centered column, rows drive the welcome offset. */
+function useTerminalDims() {
+	const { stdout } = useStdout();
+	const [columns, setColumns] = useState(stdout.columns);
+	const [rows, setRows] = useState(stdout.rows);
+	useEffect(() => {
+		const onResize = () => {
+			setColumns(stdout.columns);
+			setRows(stdout.rows);
+		};
+		stdout.on("resize", onResize);
+		return () => {
+			stdout.off("resize", onResize);
+		};
+	}, [stdout]);
+	return {
+		columns,
+		rows
+	};
+}
+/** Milliseconds the current turn has run; ticks on the spinner interval while active. */
+function useRunningClock(active) {
+	const [elapsedMs, setElapsedMs] = useState(0);
+	const startedAtRef = useRef(0);
+	useEffect(() => {
+		if (!active) {
+			setElapsedMs(0);
+			return;
+		}
+		startedAtRef.current = Date.now();
+		const timer = setInterval(() => {
+			setElapsedMs(Date.now() - startedAtRef.current);
+		}, 80);
+		return () => {
+			clearInterval(timer);
+		};
+	}, [active]);
+	return elapsedMs;
+}
+/** Centered-column width for the opencode welcome page. */
+function columnWidthFor(columns) {
+	if (columns <= 46) return Math.max(1, columns);
+	return Math.min(OPENCODE_COLUMN, columns - 2);
+}
+/** Clamp a list cursor onto its current item count. */
+function clampIndex(index, length) {
+	return Math.min(index, Math.max(0, length - 1));
+}
+/** Bottom status line for the classic layout. */
+function StatusBar(props) {
+	const { state, theme, elapsedMs } = props;
+	return jsxs(Box, {
+		justifyContent: "space-between",
+		children: [jsxs(Text, {
+			color: theme.muted,
+			dimColor: true,
+			children: [
+				state.running ? jsxs(Text, {
+					color: theme.warn,
+					children: [
+						spinnerFrame(elapsedMs),
+						" ",
+						COPY.statusRunning,
+						" · ",
+						formatElapsed(elapsedMs)
+					]
+				}) : jsx(Text, {
+					color: theme.ok,
+					children: COPY.statusIdle
+				}),
+				" · ",
+				state.modelLabel,
+				" · ",
+				state.sessionLabel,
+				jsx(ContextRing, {
+					state,
+					theme
+				})
+			]
+		}), jsx(TokenUsageLine, {
+			state,
+			theme
+		})]
+	});
+}
+/** Inline context-window readout: ring fraction plus occupancy, or nothing before a window is known. */
+function ContextRing(props) {
+	const { state, theme } = props;
+	const occupancy = state.contextOccupancy;
+	if (occupancy === null) return null;
+	const band = contextBand(occupancy.percent);
+	const color = band === "ok" ? theme.ok : band === "warn" ? theme.warn : theme.error;
+	return jsxs(Text, {
+		color: theme.muted,
+		dimColor: true,
+		children: [
+			" · ",
+			COPY.contextLabel,
+			" ",
+			jsxs(Text, {
+				color,
+				children: [
+					contextRing(occupancy.percent),
+					" ",
+					occupancy.percent,
+					"%"
+				]
+			})
+		]
+	});
+}
+/** Generation throughput and cumulative usage for the current session. */
+function TokenUsageLine(props) {
+	const { state, theme } = props;
+	return jsxs(Text, {
+		color: theme.muted,
+		dimColor: true,
+		children: [
+			COPY.tokenRateLabel,
+			" ",
+			formatTokenRate(state.tokenRate),
+			COPY.tokenRateUnit,
+			" · ",
+			COPY.tokenUsageLabel,
+			" ",
+			formatTokenCount(state.tokens.input + state.tokens.output)
+		]
+	});
+}
+/** App root: static transcript, live region, modals, and the input line. */
+function App(props) {
+	const { vm, theme, ui = "classic" } = props;
+	const chrome = ui;
+	const state = useSyncExternalStore(vm.subscribe, vm.getState);
+	const [input, setInput] = useState("");
+	const inputRef = useRef(input);
+	inputRef.current = input;
+	const [cursorPos, setCursorPos] = useState(0);
+	const cursorRef = useRef(0);
+	cursorRef.current = Math.min(cursorPos, input.length);
+	const [pickerIndex, setPickerIndex] = useState(0);
+	const [sessionSearch, setSessionSearch] = useState("");
+	const [commandIndex, setCommandIndex] = useState(0);
+	const [choiceIndex, setChoiceIndex] = useState(0);
+	const [choiceSearch, setChoiceSearch] = useState("");
+	const [expandedReasoning, setExpandedReasoning] = useState(null);
+	const [todosCollapsed, setTodosCollapsed] = useState(false);
+	const [boardCursor, setBoardCursor] = useState(-1);
+	const [panePage, setPanePage] = useState(0);
+	const pickerOpen = state.pickerOpen;
+	const choicePicker = state.choicePicker;
+	const connectWizard = state.connectWizard;
+	const titleEditor = state.titleEditor;
+	const pendingApproval = state.pendingApproval;
+	const running = state.running;
+	const elapsedMs = useRunningClock(running);
+	const { columns, rows } = useTerminalDims();
+	const columnWidth = columnWidthFor(columns);
+	const { committed, live } = useMemo(() => splitTranscript(state.messages), [state.messages]);
+	const filteredSessions = useMemo(() => {
+		const query = sessionSearch.trim().toLowerCase();
+		if (query === "") return state.pickerItems;
+		return state.pickerItems.filter((item) => [
+			item.title ?? "",
+			item.cwd ?? "",
+			item.sessionId
+		].some((value) => value.toLowerCase().includes(query)));
+	}, [state.pickerItems, sessionSearch]);
+	const safePickerIndex = clampIndex(pickerIndex, filteredSessions.length);
+	const commandQuery = input.startsWith("/") ? input.toLowerCase() : null;
+	const commandMatches = useMemo(() => commandQuery === null ? [] : COMMAND_HINTS.filter((candidate) => candidate.name.startsWith(commandQuery)), [commandQuery]);
+	const commandMenuOpen = commandQuery !== null && commandMatches.length > 0;
+	const effectiveCommandIndex = clampIndex(commandIndex, commandMatches.length);
+	const filteredChoices = useMemo(() => {
+		if (choicePicker === null) return [];
+		const query = choiceSearch.trim().toLowerCase();
+		if (query === "") return choicePicker.items;
+		return choicePicker.items.filter((item) => item.label.toLowerCase().includes(query) || (item.description?.toLowerCase().includes(query) ?? false));
+	}, [choicePicker, choiceSearch]);
+	const effectiveChoiceIndex = filteredChoices.length === 0 ? 0 : clampIndex(choiceIndex, filteredChoices.length);
+	useEffect(() => {
+		if (pickerOpen) {
+			setPickerIndex(0);
+			setSessionSearch("");
+		}
+	}, [pickerOpen]);
+	const choicePickerWasNull = useRef(true);
+	useEffect(() => {
+		if (choicePicker !== null && choicePickerWasNull.current) {
+			setChoiceIndex(0);
+			setChoiceSearch(choicePicker.filter ?? "");
+		}
+		choicePickerWasNull.current = choicePicker === null;
+	}, [choicePicker]);
+	useEffect(() => {
+		if (state.boardOpen) {
+			setBoardCursor(-1);
+			setPanePage(0);
+		}
+	}, [state.boardOpen]);
+	useEffect(() => {
+		setPanePage(0);
+	}, [boardCursor]);
+	useEffect(() => {
+		setCommandIndex(0);
+	}, [input]);
+	const setInputValue = (val) => {
+		inputRef.current = val;
+		setInput(val);
+		cursorRef.current = val.length;
+		setCursorPos(val.length);
+	};
+	const insertText = (chunk) => {
+		const cur = Math.min(cursorRef.current, inputRef.current.length);
+		const nextCur = cur + chunk.length;
+		cursorRef.current = nextCur;
+		setCursorPos(nextCur);
+		setInput((prev) => {
+			const c = Math.min(cur, prev.length);
+			const next = prev.slice(0, c) + chunk + prev.slice(c);
+			inputRef.current = next;
+			return next;
+		});
+	};
+	const deleteBackward = () => {
+		const cur = Math.min(cursorRef.current, inputRef.current.length);
+		if (cur === 0) return;
+		const nextCur = cur - 1;
+		cursorRef.current = nextCur;
+		setCursorPos(nextCur);
+		setInput((prev) => {
+			const c = Math.min(cur, prev.length);
+			if (c === 0) return prev;
+			const next = prev.slice(0, c - 1) + prev.slice(c);
+			inputRef.current = next;
+			return next;
+		});
+	};
+	const deleteForward = () => {
+		const cur = Math.min(cursorRef.current, inputRef.current.length);
+		if (cur >= inputRef.current.length) return;
+		setInput((prev) => {
+			const c = Math.min(cur, prev.length);
+			if (c >= prev.length) return prev;
+			const next = prev.slice(0, c) + prev.slice(c + 1);
+			inputRef.current = next;
+			return next;
+		});
+	};
+	const moveCursorLeft = () => {
+		setCursorPos((prev) => {
+			const next = Math.max(0, prev - 1);
+			cursorRef.current = next;
+			return next;
+		});
+	};
+	const moveCursorRight = () => {
+		setCursorPos((prev) => {
+			const next = Math.min(input.length, prev + 1);
+			cursorRef.current = next;
+			return next;
+		});
+	};
+	const moveCursorHome = () => {
+		cursorRef.current = 0;
+		setCursorPos(0);
+	};
+	const moveCursorEnd = () => {
+		cursorRef.current = input.length;
+		setCursorPos(input.length);
+	};
+	useInput((chunk, key) => {
+		const lower = chunk.toLowerCase();
+		if (isBoardToggle(lower, key)) {
+			vm.toggleBoard();
+			return;
+		}
+		if (state.boardOpen) {
+			if (key.upArrow || key.downArrow) {
+				setBoardCursor((prev) => stepTimelineCursor(prev, state.turnTimeline.length, key));
+				return;
+			}
+			if (key.pageUp || key.pageDown) {
+				setBoardCursor((prev) => {
+					const length = state.turnTimeline.length;
+					const current = prev === -1 ? length - 1 : Math.min(prev, length - 1);
+					const next = key.pageUp ? current - 5 : current + 5;
+					if (next >= length - 1) return -1;
+					return Math.max(0, next);
+				});
+				return;
+			}
+			if (key.leftArrow || key.rightArrow) {
+				setPanePage((prev) => key.leftArrow ? Math.min(prev + 1, 999) : Math.max(0, prev - 1));
+				return;
+			}
+			return;
+		}
+		if (pendingApproval !== null) {
+			if (lower === "a") vm.resolveApproval("allowed-once");
+			else if (lower === "r") vm.resolveApproval("rejected");
+			else if (key.escape || lower === "c") vm.resolveApproval("cancelled");
+			return;
+		}
+		if (pickerOpen) {
+			const count = filteredSessions.length;
+			if (key.upArrow) {
+				setPickerIndex((prev) => count === 0 ? 0 : (prev - 1 + count) % count);
+				return;
+			}
+			if (key.downArrow) {
+				setPickerIndex((prev) => count === 0 ? 0 : (prev + 1) % count);
+				return;
+			}
+			if (key.return) {
+				const item = filteredSessions[safePickerIndex];
+				if (item !== void 0) vm.requestSwitch(item.sessionId);
+				return;
+			}
+			if (key.escape || key.ctrl && lower === "c") {
+				vm.closePicker();
+				return;
+			}
+			if (key.backspace || key.delete) {
+				setSessionSearch((prev) => prev.slice(0, -1));
+				setPickerIndex(0);
+				return;
+			}
+			if (chunk !== "" && !key.ctrl && !key.meta) {
+				setSessionSearch((prev) => prev + chunk);
+				setPickerIndex(0);
+			}
+			return;
+		}
+		if (choicePicker !== null) {
+			const count = filteredChoices.length;
+			if (key.upArrow) {
+				setChoiceIndex((prev) => count === 0 ? 0 : (prev - 1 + count) % count);
+				return;
+			}
+			if (key.downArrow) {
+				setChoiceIndex((prev) => count === 0 ? 0 : (prev + 1) % count);
+				return;
+			}
+			if (key.return) {
+				const item = filteredChoices[effectiveChoiceIndex];
+				if (item !== void 0) switch (choicePicker.kind) {
+					case "model":
+						vm.pickModel(item.value);
+						setInput("");
+						break;
+					case "policy":
+						vm.pickPolicy(item.value);
+						setInput("");
+						break;
+					case "connect-provider":
+						vm.pickConnectProvider(item.value);
+						setInput("");
+						break;
+					case "connect-api":
+						vm.pickConnectApi(item.value);
+						setInput("");
+						break;
+					case "skill":
+						vm.pickSkill(item.value);
+						setInput(`/${item.value} `);
+						break;
+					case "mcp":
+						vm.pickMcp(item.value);
+						setInput(`/${item.value} `);
+						break;
+					default: assertNever(choicePicker.kind);
+				}
+				return;
+			}
+			if (key.escape || key.ctrl && lower === "c") {
+				vm.closeChoicePicker();
+				setInput("");
+				return;
+			}
+			if (key.backspace || key.delete) {
+				setChoiceSearch((prev) => prev.slice(0, -1));
+				setChoiceIndex(0);
+				return;
+			}
+			if (chunk !== "" && !key.ctrl && !key.meta) {
+				setChoiceSearch((prev) => prev + chunk);
+				setChoiceIndex(0);
+			}
+			return;
+		}
+		if (connectWizard !== null) {
+			if (key.return) {
+				vm.submitConnectInput(input);
+				setInputValue("");
+				return;
+			}
+			if (key.escape || key.ctrl && lower === "c") {
+				vm.cancelConnect();
+				setInputValue("");
+				return;
+			}
+			if (key.leftArrow) {
+				moveCursorLeft();
+				return;
+			}
+			if (key.rightArrow) {
+				moveCursorRight();
+				return;
+			}
+			if (key.ctrl && lower === "a") {
+				moveCursorHome();
+				return;
+			}
+			if (key.ctrl && lower === "e") {
+				moveCursorEnd();
+				return;
+			}
+			if (isBackspaceKey(chunk, key)) {
+				deleteBackward();
+				return;
+			}
+			if (isForwardDeleteKey(chunk, key)) {
+				deleteForward();
+				return;
+			}
+			if (key.upArrow || key.downArrow || key.tab) return;
+			if (chunk !== "" && !key.ctrl && !key.meta) insertText(chunk);
+			return;
+		}
+		if (titleEditor !== null) {
+			if (key.return) {
+				vm.submitTitle(input);
+				setInputValue("");
+				return;
+			}
+			if (key.escape || key.ctrl && lower === "c") {
+				vm.cancelTitleEditor();
+				setInputValue("");
+				return;
+			}
+			if (key.leftArrow) {
+				moveCursorLeft();
+				return;
+			}
+			if (key.rightArrow) {
+				moveCursorRight();
+				return;
+			}
+			if (key.ctrl && lower === "a") {
+				moveCursorHome();
+				return;
+			}
+			if (key.ctrl && lower === "e") {
+				moveCursorEnd();
+				return;
+			}
+			if (isBackspaceKey(chunk, key)) {
+				deleteBackward();
+				return;
+			}
+			if (isForwardDeleteKey(chunk, key)) {
+				deleteForward();
+				return;
+			}
+			if (key.upArrow || key.downArrow || key.tab) return;
+			if (chunk !== "" && !key.ctrl && !key.meta) insertText(chunk);
+			return;
+		}
+		if (commandMenuOpen) {
+			if (key.upArrow) {
+				setCommandIndex((prev) => (prev - 1 + commandMatches.length) % commandMatches.length);
+				return;
+			}
+			if (key.downArrow) {
+				setCommandIndex((prev) => (prev + 1) % commandMatches.length);
+				return;
+			}
+			if (key.return) {
+				const chosen = commandMatches[effectiveCommandIndex];
+				if (chosen !== void 0) {
+					const line = input.trimEnd();
+					setInputValue("");
+					vm.send(chosen.name + (line.length > chosen.name.length ? line.slice(chosen.name.length) : ""));
+				}
+				return;
+			}
+			if (key.escape || key.ctrl && lower === "c") {
+				setInputValue("");
+				return;
+			}
+			if (key.leftArrow) {
+				moveCursorLeft();
+				return;
+			}
+			if (key.rightArrow) {
+				moveCursorRight();
+				return;
+			}
+			if (key.ctrl && lower === "a") {
+				moveCursorHome();
+				return;
+			}
+			if (key.ctrl && lower === "e") {
+				moveCursorEnd();
+				return;
+			}
+			if (isBackspaceKey(chunk, key)) {
+				deleteBackward();
+				return;
+			}
+			if (isForwardDeleteKey(chunk, key)) {
+				deleteForward();
+				return;
+			}
+			if (chunk !== "" && !key.ctrl && !key.meta) insertText(chunk);
+			return;
+		}
+		if (key.ctrl && lower === "c") {
+			if (running) vm.stop();
+			else vm.quit();
+			return;
+		}
+		if (key.ctrl && (lower === "d" || lower === "q")) {
+			vm.quit();
+			return;
+		}
+		if (key.ctrl && lower === "t" && !key.meta) {
+			setTodosCollapsed((prev) => !prev);
+			return;
+		}
+		if (key.return) {
+			const line = input.trimEnd();
+			setInputValue("");
+			if (line !== "") vm.send(line);
+			return;
+		}
+		if (!running && input === "" && key.ctrl && lower === "r" && !key.meta) {
+			const lastReasoned = [...state.messages].reverse().find((message) => message.role === "assistant" && message.reasoning !== "" && message.status === "done");
+			if (lastReasoned !== void 0) setExpandedReasoning((prev) => prev === lastReasoned.key ? null : lastReasoned.key);
+			return;
+		}
+		if (key.ctrl && lower === "a") {
+			moveCursorHome();
+			return;
+		}
+		if (key.ctrl && lower === "e") {
+			moveCursorEnd();
+			return;
+		}
+		if (key.leftArrow) {
+			moveCursorLeft();
+			return;
+		}
+		if (key.rightArrow) {
+			moveCursorRight();
+			return;
+		}
+		if (isBackspaceKey(chunk, key)) {
+			deleteBackward();
+			return;
+		}
+		if (isForwardDeleteKey(chunk, key)) {
+			deleteForward();
+			return;
+		}
+		if (key.upArrow || key.downArrow) {
+			const recalled = key.upArrow ? vm.historyOlder(input) : vm.historyNewer(input);
+			if (recalled !== null) setInputValue(recalled);
+			return;
+		}
+		if (key.escape || key.tab) return;
+		if (chunk !== "" && !key.ctrl && !key.meta) insertText(chunk);
+	});
+	const renderRow = (message) => jsx(MessageRow, {
+		message,
+		theme,
+		reasoningExpanded: expandedReasoning === message.key,
+		chrome
+	}, message.key);
+	const staticList = jsx(Static, {
+		items: committed,
+		children: renderRow
+	}, `${state.sessionId}:${state.transcriptEpoch}`);
+	const overlays = jsxs(Fragment, { children: [
+		state.error !== null && jsx(Box, {
+			marginBottom: 1,
+			children: jsxs(Text, {
+				color: theme.error,
+				children: [
+					COPY.errorGlyph,
+					" ",
+					state.error
+				]
+			})
+		}),
+		jsx(ApprovalModal, {
+			prompt: pendingApproval,
+			theme
+		}),
+		connectWizard !== null && jsx(ConnectPrompt, {
+			wizard: connectWizard,
+			theme
+		}),
+		titleEditor !== null && jsx(TitlePrompt, {
+			current: titleEditor,
+			theme
+		}),
+		choicePicker !== null && jsx(ChoiceList, {
+			title: choicePicker.title,
+			items: filteredChoices,
+			selected: effectiveChoiceIndex,
+			theme,
+			note: choicePicker.note,
+			search: choiceSearch
+		}),
+		commandMenuOpen && jsx(CommandMenu, {
+			matches: commandMatches,
+			selected: effectiveCommandIndex,
+			theme
+		})
+	] });
+	const todos = state.todos;
+	const todosVisible = todos !== null && todos.length > 0 && todos.some((todo) => todo.status !== "completed") && !todosCollapsed;
+	const queuedNote = state.queued.length > 0 && jsx(Box, {
+		marginBottom: 1,
+		children: jsxs(Text, {
+			color: theme.muted,
+			dimColor: true,
+			children: [
+				COPY.queuedLabel,
+				" ",
+				state.queued.length,
+				" · ",
+				collapseFirstLine(state.queued[state.queued.length - 1] ?? "", 48)
+			]
+		})
+	});
+	const chromeRows = (chrome === "classic" ? LIVE_CHROME.classicInput + LIVE_CHROME.statusLine : LIVE_CHROME.opencodeComposer) + (state.error !== null ? LIVE_CHROME.error : 0) + (pendingApproval !== null ? LIVE_CHROME.approval : 0) + (pickerOpen ? LIVE_CHROME.sessionPicker : 0) + (choicePicker !== null ? LIVE_CHROME.choicePicker : 0) + (commandMenuOpen ? LIVE_CHROME.commandMenu : 0) + (connectWizard !== null || titleEditor !== null ? LIVE_CHROME.prompt : 0) + (todosVisible ? LIVE_CHROME.todoPanel + (todos?.length ?? 0) : 0) + (state.queued.length > 0 ? LIVE_CHROME.queued : 0);
+	const liveFit = useMemo(() => fitLiveMessages(live, liveRowBudget(rows, chromeRows), {
+		columns,
+		labeled: chrome === "classic",
+		expandedKey: expandedReasoning
+	}), [
+		live,
+		rows,
+		chromeRows,
+		columns,
+		chrome,
+		expandedReasoning
+	]);
+	const liveList = jsxs(Box, {
+		flexDirection: "column",
+		children: [liveFit.notice && jsx(Text, {
+			color: theme.muted,
+			dimColor: true,
+			children: `${COPY.liveTailMore}${liveFit.hiddenRows} ${COPY.liveTailRest}`
+		}), liveFit.messages.map(renderRow)]
+	});
+	const classicInput = jsxs(Box, {
+		marginTop: 1,
+		children: [jsx(Text, {
+			color: theme.brand,
+			children: "❯ "
+		}), renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder)]
+	});
+	const opencodeComposer = jsxs(Fragment, { children: [jsxs(Box, {
+		borderStyle: "round",
+		borderColor: theme.brand,
+		marginTop: 1,
+		paddingX: 1,
+		flexDirection: "column",
+		children: [jsxs(Box, { children: [jsx(Text, {
+			color: theme.brand,
+			children: "> "
+		}), renderInputWithCursor(input, cursorPos, theme, running, connectWizard !== null || titleEditor !== null ? void 0 : COPY.composerPlaceholder)] }), jsxs(Box, {
+			marginTop: 1,
+			justifyContent: "space-between",
+			children: [jsxs(Text, {
+				color: theme.muted,
+				dimColor: true,
+				children: [
+					state.modelLabel,
+					" · ",
+					COPY.permissionLabel,
+					" ",
+					jsx(Text, {
+						color: theme.brand,
+						children: state.permissionPreset
+					}),
+					jsx(ContextRing, {
+						state,
+						theme
+					})
+				]
+			}), jsx(Text, {
+				color: running ? theme.warn : theme.ok,
+				children: running ? `${spinnerFrame(elapsedMs)} ${COPY.statusRunning} · ${formatElapsed(elapsedMs)}` : COPY.statusIdle
+			})]
+		})]
+	}), jsx(Box, {
+		marginTop: 1,
+		justifyContent: "flex-end",
+		children: jsx(TokenUsageLine, {
+			state,
+			theme
+		})
+	})] });
+	if (state.boardOpen) return jsxs(Box, {
+		flexDirection: "column",
+		children: [staticList, jsx(TaskBoard, {
+			state,
+			theme,
+			elapsedMs,
+			cursor: boardCursor,
+			panePage,
+			rows,
+			columns
+		})]
+	});
+	if (chrome === "opencode") {
+		if (pickerOpen) return jsxs(Box, {
+			width: "100%",
+			height: Math.max(8, rows - 2),
+			alignItems: "center",
+			justifyContent: "center",
+			children: [staticList, jsx(Box, {
+				width: Math.min(columnWidth, 78),
+				children: jsx(SessionPicker, {
+					items: filteredSessions,
+					selected: safePickerIndex,
+					search: sessionSearch,
+					theme
+				})
+			})]
+		});
+		if (committed.length === 0 && live.length === 0) return jsxs(Box, {
+			flexDirection: "column",
+			width: "100%",
+			marginTop: Math.max(0, Math.floor((rows - 10) / 2)),
+			children: [staticList, jsx(Box, {
+				width: "100%",
+				justifyContent: "center",
+				children: jsxs(Box, {
+					width: columnWidth,
+					flexDirection: "column",
+					children: [
+						jsx(Box, {
+							justifyContent: "center",
+							children: WORDMARK.map((glyph, index) => jsx(Text, {
+								color: WORDMARK_COLORS[index] ?? theme.brand,
+								bold: true,
+								children: glyph
+							}, glyph))
+						}),
+						jsxs(Box, {
+							justifyContent: "center",
+							marginTop: 1,
+							children: [jsx(Text, {
+								color: theme.text,
+								children: "DeepSeek "
+							}), jsx(Text, {
+								color: theme.brand,
+								bold: true,
+								children: COPY.welcomeTagline
+							})]
+						}),
+						overlays,
+						todosVisible && jsx(TaskPanel, {
+							todos,
+							theme
+						}),
+						queuedNote,
+						opencodeComposer
+					]
+				})
+			})]
+		});
+		return jsxs(Box, {
+			flexDirection: "column",
+			width: "100%",
+			children: [
+				staticList,
+				liveList,
+				overlays,
+				todosVisible && jsx(TaskPanel, {
+					todos,
+					theme
+				}),
+				queuedNote,
+				opencodeComposer
+			]
+		});
+	}
+	return jsxs(Box, {
+		flexDirection: "column",
+		children: [
+			staticList,
+			liveList,
+			pickerOpen && jsx(SessionPicker, {
+				items: filteredSessions,
+				selected: safePickerIndex,
+				search: sessionSearch,
+				theme
+			}),
+			overlays,
+			todosVisible && jsx(TaskPanel, {
+				todos,
+				theme
+			}),
+			queuedNote,
+			classicInput,
+			jsx(StatusBar, {
+				state,
+				theme,
+				elapsedMs
+			})
+		]
+	});
 }
 //#endregion
 //#region lib/types/list-projection.js
@@ -4256,8 +4676,10 @@ async function run(ctx, config) {
 				theme,
 				ui: chrome
 			});
-			if (ink === null) ink = internals.render(element);
-			else ink.rerender(element);
+			if (ink === null) {
+				if (process.stdout.isTTY) process.stdout.write("\r\x1B[2K");
+				ink = internals.render(element);
+			} else ink.rerender(element);
 			const requested = await vm.done;
 			testHooks.currentVm = null;
 			const forkSeed = requested.type === "fork" || requested.type === "model-switch" ? collectForkSeed(agent.session) : [];
