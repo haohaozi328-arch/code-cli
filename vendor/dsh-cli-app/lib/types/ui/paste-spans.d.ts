@@ -55,6 +55,38 @@ export declare function spansAfterInsert(spans: readonly PasteSpan[], at: number
  * @returns the next span list.
  */
 export declare function spansAfterDelete(spans: readonly PasteSpan[], at: number, length: number): readonly PasteSpan[];
+/**
+ * The folded region covering one buffer offset.
+ * @param spans - current spans.
+ * @param offset - buffer offset of a character (not a caret gap).
+ * @returns the covering span, or undefined outside every fold.
+ */
+export declare function spanCovering(spans: readonly PasteSpan[], offset: number): PasteSpan | undefined;
+/**
+ * The range one deletion keystroke removes. A placeholder is ONE thing on the
+ * prompt, so it deletes as one thing: Backspace at its trailing edge (or
+ * Delete at its leading edge) removes the whole pasted region rather than
+ * peeling a character the user cannot see off its end.
+ * @param spans - current spans.
+ * @param cursor - caret offset in the buffer.
+ * @param direction - 'backward' for Backspace, 'forward' for Delete.
+ * @param length - buffer length (bounds the forward case).
+ * @returns the range to remove, or null when the keystroke is a no-op.
+ */
+export declare function deletionRange(spans: readonly PasteSpan[], cursor: number, direction: 'backward' | 'forward', length: number): {
+    readonly start: number;
+    readonly length: number;
+} | null;
+/**
+ * Step the caret one position, treating a folded region as a single stop: the
+ * caret never lands inside a placeholder, where it would be invisible.
+ * @param spans - current spans.
+ * @param cursor - caret offset in the buffer.
+ * @param delta - -1 for Left, +1 for Right.
+ * @param length - buffer length.
+ * @returns the next caret offset.
+ */
+export declare function stepCursor(spans: readonly PasteSpan[], cursor: number, delta: -1 | 1, length: number): number;
 /** A folded view of the buffer plus the caret mapping the renderer needs. */
 export interface FoldedInput {
     /** What the prompt renders (placeholders substituted). */

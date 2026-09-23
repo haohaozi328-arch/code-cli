@@ -3584,6 +3584,68 @@ function spansAfterDelete(spans, at, length) {
 	return next;
 }
 /**
+* The folded region covering one buffer offset.
+* @param spans - current spans.
+* @param offset - buffer offset of a character (not a caret gap).
+* @returns the covering span, or undefined outside every fold.
+*/
+function spanCovering(spans, offset) {
+	return spans.find((span) => offset >= span.start && offset < span.start + span.length);
+}
+/**
+* The range one deletion keystroke removes. A placeholder is ONE thing on the
+* prompt, so it deletes as one thing: Backspace at its trailing edge (or
+* Delete at its leading edge) removes the whole pasted region rather than
+* peeling a character the user cannot see off its end.
+* @param spans - current spans.
+* @param cursor - caret offset in the buffer.
+* @param direction - 'backward' for Backspace, 'forward' for Delete.
+* @param length - buffer length (bounds the forward case).
+* @returns the range to remove, or null when the keystroke is a no-op.
+*/
+function deletionRange(spans, cursor, direction, length) {
+	if (direction === "backward") {
+		if (cursor <= 0) return null;
+		const span = spanCovering(spans, cursor - 1);
+		if (span !== void 0) return {
+			start: span.start,
+			length: span.length
+		};
+		return {
+			start: cursor - 1,
+			length: 1
+		};
+	}
+	if (cursor >= length) return null;
+	const span = spanCovering(spans, cursor);
+	if (span !== void 0) return {
+		start: span.start,
+		length: span.length
+	};
+	return {
+		start: cursor,
+		length: 1
+	};
+}
+/**
+* Step the caret one position, treating a folded region as a single stop: the
+* caret never lands inside a placeholder, where it would be invisible.
+* @param spans - current spans.
+* @param cursor - caret offset in the buffer.
+* @param delta - -1 for Left, +1 for Right.
+* @param length - buffer length.
+* @returns the next caret offset.
+*/
+function stepCursor(spans, cursor, delta, length) {
+	const target = Math.min(Math.max(0, cursor + delta), length);
+	if (delta === -1) {
+		const span = spanCovering(spans, target);
+		return span === void 0 ? target : span.start;
+	}
+	const span = spanCovering(spans, target - 1);
+	return span === void 0 ? target : span.start + span.length;
+}
+/**
 * Fold every pasted region of the buffer into its placeholder.
 * @param text - the full buffer.
 * @param spans - folded regions (ordered, non-overlapping, in range).
@@ -3963,45 +4025,44 @@ function App(props) {
 	};
 	const deleteBackward = () => {
 		const cur = Math.min(cursorRef.current, inputRef.current.length);
-		if (cur === 0) return;
-		const nextCur = cur - 1;
-		cursorRef.current = nextCur;
-		setCursorPos(nextCur);
-		const spans = spansAfterDelete(pasteSpansRef.current, cur - 1, 1);
+		const range = deletionRange(pasteSpansRef.current, cur, "backward", inputRef.current.length);
+		if (range === null) return;
+		cursorRef.current = range.start;
+		setCursorPos(range.start);
+		const spans = spansAfterDelete(pasteSpansRef.current, range.start, range.length);
 		pasteSpansRef.current = spans;
 		setPasteSpans(spans);
 		setInput((prev) => {
-			const c = Math.min(cur, prev.length);
-			if (c === 0) return prev;
-			const next = prev.slice(0, c - 1) + prev.slice(c);
+			const next = prev.slice(0, range.start) + prev.slice(range.start + range.length);
 			inputRef.current = next;
 			return next;
 		});
 	};
 	const deleteForward = () => {
 		const cur = Math.min(cursorRef.current, inputRef.current.length);
-		if (cur >= inputRef.current.length) return;
-		const spans = spansAfterDelete(pasteSpansRef.current, cur, 1);
+		const range = deletionRange(pasteSpansRef.current, cur, "forward", inputRef.current.length);
+		if (range === null) return;
+		cursorRef.current = range.start;
+		setCursorPos(range.start);
+		const spans = spansAfterDelete(pasteSpansRef.current, range.start, range.length);
 		pasteSpansRef.current = spans;
 		setPasteSpans(spans);
 		setInput((prev) => {
-			const c = Math.min(cur, prev.length);
-			if (c >= prev.length) return prev;
-			const next = prev.slice(0, c) + prev.slice(c + 1);
+			const next = prev.slice(0, range.start) + prev.slice(range.start + range.length);
 			inputRef.current = next;
 			return next;
 		});
 	};
 	const moveCursorLeft = () => {
 		setCursorPos((prev) => {
-			const next = Math.max(0, prev - 1);
+			const next = stepCursor(pasteSpansRef.current, Math.min(prev, inputRef.current.length), -1, inputRef.current.length);
 			cursorRef.current = next;
 			return next;
 		});
 	};
 	const moveCursorRight = () => {
 		setCursorPos((prev) => {
-			const next = Math.min(input.length, prev + 1);
+			const next = stepCursor(pasteSpansRef.current, Math.min(prev, inputRef.current.length), 1, inputRef.current.length);
 			cursorRef.current = next;
 			return next;
 		});
