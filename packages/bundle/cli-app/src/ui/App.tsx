@@ -29,7 +29,9 @@ import { TaskPanel } from './todos.tsx'
 import { TIMELINE_PAGE, TaskBoard, isBoardToggle, stepTimelineCursor } from './taskboard.tsx'
 import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
 import type { PasteSpan } from './paste-spans.ts'
-import { foldInput, isPasteChunk, spansAfterDelete, spansAfterInsert } from './paste-spans.ts'
+import {
+  deletionRange, foldInput, isPasteChunk, spansAfterDelete, spansAfterInsert, stepCursor,
+} from './paste-spans.ts'
 import type { ThemeTokens } from './theme.ts'
 import type { UiChrome } from './chrome.ts'
 
@@ -329,17 +331,18 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   const deleteBackward = () => {
     const cur = Math.min(cursorRef.current, inputRef.current.length)
-    if (cur === 0) return
-    const nextCur = cur - 1
-    cursorRef.current = nextCur
-    setCursorPos(nextCur)
-    const spans = spansAfterDelete(pasteSpansRef.current, cur - 1, 1)
+    // A placeholder is one thing on the prompt, so Backspace removes it as one
+    // thing: the whole pasted region goes, never an invisible character off
+    // its end.
+    const range = deletionRange(pasteSpansRef.current, cur, 'backward', inputRef.current.length)
+    if (range === null) return
+    cursorRef.current = range.start
+    setCursorPos(range.start)
+    const spans = spansAfterDelete(pasteSpansRef.current, range.start, range.length)
     pasteSpansRef.current = spans
     setPasteSpans(spans)
     setInput((prev) => {
-      const c = Math.min(cur, prev.length)
-      if (c === 0) return prev
-      const next = prev.slice(0, c - 1) + prev.slice(c)
+      const next = prev.slice(0, range.start) + prev.slice(range.start + range.length)
       inputRef.current = next
       return next
     })
@@ -347,22 +350,26 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   const deleteForward = () => {
     const cur = Math.min(cursorRef.current, inputRef.current.length)
-    if (cur >= inputRef.current.length) return
-    const spans = spansAfterDelete(pasteSpansRef.current, cur, 1)
+    // Delete at a placeholder's leading edge drops the whole region too.
+    const range = deletionRange(pasteSpansRef.current, cur, 'forward', inputRef.current.length)
+    if (range === null) return
+    cursorRef.current = range.start
+    setCursorPos(range.start)
+    const spans = spansAfterDelete(pasteSpansRef.current, range.start, range.length)
     pasteSpansRef.current = spans
     setPasteSpans(spans)
     setInput((prev) => {
-      const c = Math.min(cur, prev.length)
-      if (c >= prev.length) return prev
-      const next = prev.slice(0, c) + prev.slice(c + 1)
+      const next = prev.slice(0, range.start) + prev.slice(range.start + range.length)
       inputRef.current = next
       return next
     })
   }
 
   const moveCursorLeft = () => {
+    // The caret steps across a whole placeholder: inside it there is nothing
+    // to point at, and the next Backspace would look like it skipped a key.
     setCursorPos((prev) => {
-      const next = Math.max(0, prev - 1)
+      const next = stepCursor(pasteSpansRef.current, Math.min(prev, inputRef.current.length), -1, inputRef.current.length)
       cursorRef.current = next
       return next
     })
@@ -370,7 +377,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
 
   const moveCursorRight = () => {
     setCursorPos((prev) => {
-      const next = Math.min(input.length, prev + 1)
+      const next = stepCursor(pasteSpansRef.current, Math.min(prev, inputRef.current.length), 1, inputRef.current.length)
       cursorRef.current = next
       return next
     })

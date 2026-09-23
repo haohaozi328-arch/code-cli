@@ -5,7 +5,8 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { App } from '../src/ui/index.ts'
 import { THEMES } from '../src/ui/theme.ts'
 import {
-  PASTE_FOLD_MIN, foldInput, isPasteChunk, spansAfterDelete, spansAfterInsert, summarizePaste,
+  PASTE_FOLD_MIN, deletionRange, foldInput, isPasteChunk, spanCovering, spansAfterDelete,
+  spansAfterInsert, stepCursor, summarizePaste,
 } from '../src/ui/paste-spans.ts'
 import type { ExitRequest, UiState, ViewModel } from '../src/ui/model.ts'
 
@@ -128,6 +129,32 @@ describe('paste folding', () => {
     expect(withNew).toEqual([{ start: 0, length: 90 }])
   })
 
+  it('deletes a folded region whole instead of one character at a time', () => {
+    const spans = [{ start: 3, length: 100 }]
+    const length = 107
+    // Backspace at the placeholder's trailing edge removes the whole region.
+    expect(deletionRange(spans, 103, 'backward', length)).toEqual({ start: 3, length: 100 })
+    // Delete at its leading edge does the same.
+    expect(deletionRange(spans, 3, 'forward', length)).toEqual({ start: 3, length: 100 })
+    // Ordinary text around it still deletes one character.
+    expect(deletionRange(spans, 3, 'backward', length)).toEqual({ start: 2, length: 1 })
+    expect(deletionRange(spans, 105, 'forward', length)).toEqual({ start: 105, length: 1 })
+    // Buffer edges are no-ops.
+    expect(deletionRange(spans, 0, 'backward', length)).toBeNull()
+    expect(deletionRange(spans, length, 'forward', length)).toBeNull()
+  })
+
+  it('steps the caret across a whole placeholder', () => {
+    const spans = [{ start: 3, length: 100 }]
+    const length = 107
+    expect(spanCovering(spans, 50)?.start).toBe(3)
+    expect(spanCovering(spans, 2)).toBeUndefined()
+    expect(stepCursor(spans, 103, -1, length)).toBe(3)
+    expect(stepCursor(spans, 3, 1, length)).toBe(103)
+    expect(stepCursor(spans, 2, 1, length)).toBe(3)
+    expect(stepCursor(spans, 0, -1, length)).toBe(0)
+  })
+
   it('renders a pasted block as one placeholder line and still sends the full text', async () => {
     const state = snapshot({})
     const send = vi.fn()
@@ -158,6 +185,26 @@ describe('paste folding', () => {
     app.stdin.write('hello')
     await new Promise(resolve => setTimeout(resolve, 30))
     expect(stripAnsi(app.lastFrame() ?? '')).toContain('hello')
+    app.unmount()
+  })
+
+  it('drops the whole paste on one Backspace', async () => {
+    const state = snapshot({})
+    const send = vi.fn()
+    const app = render(React.createElement(App, {
+      key: 'test-unpaste', vm: viewModel(state, send), theme: THEMES['deep-forest'], ui: 'classic',
+    }))
+    await new Promise(resolve => setTimeout(resolve, 20))
+    app.stdin.write('尾巴')
+    app.stdin.write('段落内容'.repeat(30))
+    await new Promise(resolve => setTimeout(resolve, 30))
+    expect(stripAnsi(app.lastFrame() ?? '')).toContain('字符】')
+    // ONE backspace takes the whole placeholder, leaving the typed prefix.
+    app.stdin.write('\x7f')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    const frame = stripAnsi(app.lastFrame() ?? '')
+    expect(frame).not.toContain('字符】')
+    expect(frame).toContain('尾巴')
     app.unmount()
   })
 })

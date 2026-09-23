@@ -114,6 +114,69 @@ export function spansAfterDelete(
   return next
 }
 
+/**
+ * The folded region covering one buffer offset.
+ * @param spans - current spans.
+ * @param offset - buffer offset of a character (not a caret gap).
+ * @returns the covering span, or undefined outside every fold.
+ */
+export function spanCovering(spans: readonly PasteSpan[], offset: number): PasteSpan | undefined {
+  return spans.find(span => offset >= span.start && offset < span.start + span.length)
+}
+
+/**
+ * The range one deletion keystroke removes. A placeholder is ONE thing on the
+ * prompt, so it deletes as one thing: Backspace at its trailing edge (or
+ * Delete at its leading edge) removes the whole pasted region rather than
+ * peeling a character the user cannot see off its end.
+ * @param spans - current spans.
+ * @param cursor - caret offset in the buffer.
+ * @param direction - 'backward' for Backspace, 'forward' for Delete.
+ * @param length - buffer length (bounds the forward case).
+ * @returns the range to remove, or null when the keystroke is a no-op.
+ */
+export function deletionRange(
+  spans: readonly PasteSpan[],
+  cursor: number,
+  direction: 'backward' | 'forward',
+  length: number,
+): { readonly start: number; readonly length: number } | null {
+  if (direction === 'backward') {
+    if (cursor <= 0) return null
+    const span = spanCovering(spans, cursor - 1)
+    if (span !== undefined) return { start: span.start, length: span.length }
+    return { start: cursor - 1, length: 1 }
+  }
+  if (cursor >= length) return null
+  const span = spanCovering(spans, cursor)
+  if (span !== undefined) return { start: span.start, length: span.length }
+  return { start: cursor, length: 1 }
+}
+
+/**
+ * Step the caret one position, treating a folded region as a single stop: the
+ * caret never lands inside a placeholder, where it would be invisible.
+ * @param spans - current spans.
+ * @param cursor - caret offset in the buffer.
+ * @param delta - -1 for Left, +1 for Right.
+ * @param length - buffer length.
+ * @returns the next caret offset.
+ */
+export function stepCursor(
+  spans: readonly PasteSpan[],
+  cursor: number,
+  delta: -1 | 1,
+  length: number,
+): number {
+  const target = Math.min(Math.max(0, cursor + delta), length)
+  if (delta === -1) {
+    const span = spanCovering(spans, target)
+    return span === undefined ? target : span.start
+  }
+  const span = spanCovering(spans, target - 1)
+  return span === undefined ? target : span.start + span.length
+}
+
 /** A folded view of the buffer plus the caret mapping the renderer needs. */
 export interface FoldedInput {
   /** What the prompt renders (placeholders substituted). */
