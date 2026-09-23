@@ -87,6 +87,11 @@ export declare const COPY: {
     readonly liveTailMore: "…还有";
     readonly liveTailRest: "行未显示 · 全文随回合结束打印";
     readonly inputNewlineMark: " ↵ ";
+    readonly pasteOpen: "【";
+    readonly pasteClose: "】";
+    readonly pasteEllipsis: "...";
+    readonly pasteCountSeparator: "，";
+    readonly pasteCountSuffix: "字符";
     readonly connectDone: "已连接模型商 {provider}，现在可使用 /model {provider}/模型ID 切换模型。";
 };
 /**

@@ -147,6 +147,11 @@ const COPY = {
 	liveTailMore: "…还有",
 	liveTailRest: "行未显示 · 全文随回合结束打印",
 	inputNewlineMark: " ↵ ",
+	pasteOpen: "【",
+	pasteClose: "】",
+	pasteEllipsis: "...",
+	pasteCountSeparator: "，",
+	pasteCountSuffix: "字符",
 	connectDone: "已连接模型商 {provider}，现在可使用 /model {provider}/模型ID 切换模型。"
 };
 /**
@@ -3498,6 +3503,150 @@ function TitlePrompt(props) {
 		]
 	});
 }
+/**
+* Whether one input chunk is a paste (a burst no keyboard produces).
+* @param chunk - the raw chunk Ink delivered.
+* @returns true when the chunk should fold.
+*/
+function isPasteChunk(chunk) {
+	return chunk.length >= 80 || /\r|\n/.test(chunk);
+}
+/**
+* The placeholder shown in place of one pasted region.
+* @param text - the pasted text, verbatim.
+* @returns `【head...tail，N字符】`, or the whole flattened text when it is
+* already shorter than the head+tail budget.
+*/
+function summarizePaste(text) {
+	const flat = Array.from(text.replace(/\s+/gu, " ").trim());
+	const count = Array.from(text).length;
+	const body = flat.length <= 30 ? flat.join("") : `${flat.slice(0, 20).join("")}${COPY.pasteEllipsis}${flat.slice(-10).join("")}`;
+	return `${COPY.pasteOpen}${body}${COPY.pasteCountSeparator}${count}${COPY.pasteCountSuffix}${COPY.pasteClose}`;
+}
+/**
+* Re-base every span after an insertion, optionally recording the insertion
+* itself as a new folded region. An insertion landing strictly inside a span
+* breaks that fold: the region is no longer the verbatim paste it summarized.
+* @param spans - current spans (ordered, non-overlapping).
+* @param at - insertion offset.
+* @param length - inserted length.
+* @param folded - whether the inserted chunk is itself a paste.
+* @returns the next span list.
+*/
+function spansAfterInsert(spans, at, length, folded) {
+	const next = [];
+	for (const span of spans) {
+		const end = span.start + span.length;
+		if (at <= span.start) {
+			next.push({
+				start: span.start + length,
+				length: span.length
+			});
+			continue;
+		}
+		if (at >= end) {
+			next.push(span);
+			continue;
+		}
+	}
+	if (folded && length > 0) next.push({
+		start: at,
+		length
+	});
+	return next.sort((a, b) => a.start - b.start);
+}
+/**
+* Re-base every span after a deletion. A deletion overlapping a span unfolds
+* it (the remaining text is shown verbatim), which keeps the placeholder
+* honest: it always stands for exactly the bytes that were pasted.
+* @param spans - current spans.
+* @param at - first deleted offset.
+* @param length - deleted length.
+* @returns the next span list.
+*/
+function spansAfterDelete(spans, at, length) {
+	const removeEnd = at + length;
+	const next = [];
+	for (const span of spans) {
+		const end = span.start + span.length;
+		if (removeEnd <= span.start) {
+			next.push({
+				start: span.start - length,
+				length: span.length
+			});
+			continue;
+		}
+		if (at >= end) {
+			next.push(span);
+			continue;
+		}
+	}
+	return next;
+}
+/**
+* Fold every pasted region of the buffer into its placeholder.
+* @param text - the full buffer.
+* @param spans - folded regions (ordered, non-overlapping, in range).
+* @returns the display text and the caret mapping.
+*/
+function foldInput(text, spans) {
+	const usable = [...spans].filter((span) => span.length > 0 && span.start >= 0 && span.start + span.length <= text.length).sort((a, b) => a.start - b.start);
+	if (usable.length === 0) return {
+		display: text,
+		mapCursor: (cursor) => cursor
+	};
+	let display = "";
+	let cut = 0;
+	const pieces = [];
+	for (const span of usable) {
+		if (span.start < cut) continue;
+		if (span.start > cut) {
+			const plain = text.slice(cut, span.start);
+			pieces.push({
+				bufferStart: cut,
+				bufferEnd: span.start,
+				displayStart: display.length,
+				displayEnd: display.length + plain.length,
+				fold: false
+			});
+			display += plain;
+		}
+		const summary = summarizePaste(text.slice(span.start, span.start + span.length));
+		pieces.push({
+			bufferStart: span.start,
+			bufferEnd: span.start + span.length,
+			displayStart: display.length,
+			displayEnd: display.length + summary.length,
+			fold: true
+		});
+		display += summary;
+		cut = span.start + span.length;
+	}
+	if (cut < text.length) {
+		const plain = text.slice(cut);
+		pieces.push({
+			bufferStart: cut,
+			bufferEnd: text.length,
+			displayStart: display.length,
+			displayEnd: display.length + plain.length,
+			fold: false
+		});
+		display += plain;
+	}
+	const mapCursor = (cursor) => {
+		const clamped = Math.min(Math.max(0, cursor), text.length);
+		for (const piece of pieces) {
+			if (clamped >= piece.bufferEnd) continue;
+			if (piece.fold) return clamped <= piece.bufferStart ? piece.displayStart : piece.displayEnd;
+			return piece.displayStart + (clamped - piece.bufferStart);
+		}
+		return display.length;
+	};
+	return {
+		display,
+		mapCursor
+	};
+}
 //#endregion
 //#region lib/types/ui/App.js
 /**
@@ -3541,7 +3690,7 @@ function isForwardDeleteKey(chunk, key) {
 	return Boolean(key.delete && chunk === "\x1B[3~");
 }
 /** Render prompt input with an interactive cursor pointer. */
-function renderInputWithCursor(text, cursor, theme, running, placeholder) {
+function renderInputWithCursor(text, cursor, theme, running, placeholder, pasteSpans = []) {
 	if (text === "") return jsxs(Fragment, { children: [placeholder !== void 0 ? jsx(Text, {
 		color: theme.muted,
 		dimColor: true,
@@ -3550,17 +3699,19 @@ function renderInputWithCursor(text, cursor, theme, running, placeholder) {
 		color: theme.brand,
 		children: "▌"
 	})] });
-	const clamped = Math.min(Math.max(0, cursor), text.length);
-	if (clamped >= text.length) return jsxs(Fragment, { children: [jsx(Text, {
+	const folded = foldInput(text, pasteSpans);
+	const shown = folded.display;
+	const clamped = folded.mapCursor(Math.min(Math.max(0, cursor), text.length));
+	if (clamped >= shown.length) return jsxs(Fragment, { children: [jsx(Text, {
 		color: theme.text,
-		children: previewInput(text)
+		children: previewInput(shown)
 	}), jsx(Text, {
 		color: theme.brand,
 		children: "▌"
 	})] });
-	const before = previewInput(text.slice(0, clamped));
-	const under = previewInput(text.slice(clamped, clamped + 1)) || " ";
-	const after = previewInput(text.slice(clamped + 1));
+	const before = previewInput(shown.slice(0, clamped));
+	const under = previewInput(shown.slice(clamped, clamped + 1)) || " ";
+	const after = previewInput(shown.slice(clamped + 1));
 	return jsxs(Fragment, { children: [
 		jsx(Text, {
 			color: theme.text,
@@ -3718,6 +3869,9 @@ function App(props) {
 	const [cursorPos, setCursorPos] = useState(0);
 	const cursorRef = useRef(0);
 	cursorRef.current = Math.min(cursorPos, input.length);
+	const [pasteSpans, setPasteSpans] = useState([]);
+	const pasteSpansRef = useRef([]);
+	pasteSpansRef.current = pasteSpans;
 	const [pickerIndex, setPickerIndex] = useState(0);
 	const [sessionSearch, setSessionSearch] = useState("");
 	const [commandIndex, setCommandIndex] = useState(0);
@@ -3789,12 +3943,17 @@ function App(props) {
 		setInput(val);
 		cursorRef.current = val.length;
 		setCursorPos(val.length);
+		pasteSpansRef.current = [];
+		setPasteSpans([]);
 	};
 	const insertText = (chunk) => {
 		const cur = Math.min(cursorRef.current, inputRef.current.length);
 		const nextCur = cur + chunk.length;
 		cursorRef.current = nextCur;
 		setCursorPos(nextCur);
+		const spans = spansAfterInsert(pasteSpansRef.current, cur, chunk.length, isPasteChunk(chunk));
+		pasteSpansRef.current = spans;
+		setPasteSpans(spans);
 		setInput((prev) => {
 			const c = Math.min(cur, prev.length);
 			const next = prev.slice(0, c) + chunk + prev.slice(c);
@@ -3808,6 +3967,9 @@ function App(props) {
 		const nextCur = cur - 1;
 		cursorRef.current = nextCur;
 		setCursorPos(nextCur);
+		const spans = spansAfterDelete(pasteSpansRef.current, cur - 1, 1);
+		pasteSpansRef.current = spans;
+		setPasteSpans(spans);
 		setInput((prev) => {
 			const c = Math.min(cur, prev.length);
 			if (c === 0) return prev;
@@ -3819,6 +3981,9 @@ function App(props) {
 	const deleteForward = () => {
 		const cur = Math.min(cursorRef.current, inputRef.current.length);
 		if (cur >= inputRef.current.length) return;
+		const spans = spansAfterDelete(pasteSpansRef.current, cur, 1);
+		pasteSpansRef.current = spans;
+		setPasteSpans(spans);
 		setInput((prev) => {
 			const c = Math.min(cur, prev.length);
 			if (c >= prev.length) return prev;
@@ -4105,6 +4270,10 @@ function App(props) {
 			vm.quit();
 			return;
 		}
+		if (chunk.length > 1 && isPasteChunk(chunk) && !key.ctrl && !key.meta) {
+			insertText(chunk);
+			return;
+		}
 		if (key.ctrl && lower === "t" && !key.meta) {
 			setTodosCollapsed((prev) => !prev);
 			return;
@@ -4242,7 +4411,7 @@ function App(props) {
 		children: [jsx(Text, {
 			color: theme.brand,
 			children: "❯ "
-		}), renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder)]
+		}), renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder, pasteSpans)]
 	});
 	const opencodeComposer = jsxs(Fragment, { children: [jsxs(Box, {
 		borderStyle: "round",
@@ -4253,7 +4422,7 @@ function App(props) {
 		children: [jsxs(Box, { children: [jsx(Text, {
 			color: theme.brand,
 			children: "> "
-		}), renderInputWithCursor(input, cursorPos, theme, running, connectWizard !== null || titleEditor !== null ? void 0 : COPY.composerPlaceholder)] }), jsxs(Box, {
+		}), renderInputWithCursor(input, cursorPos, theme, running, connectWizard !== null || titleEditor !== null ? void 0 : COPY.composerPlaceholder, pasteSpans)] }), jsxs(Box, {
 			marginTop: 1,
 			justifyContent: "space-between",
 			children: [jsxs(Text, {
