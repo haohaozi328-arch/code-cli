@@ -105,6 +105,14 @@ export const COPY = {
   liveTailRest: '行未显示 · 全文随回合结束打印',
   inputNewlineMark: ' ↵ ',
 
+  // Pasted-region placeholder: the composer shows 【head...tail，N字符】 while
+  // the buffer keeps the pasted text verbatim.
+  pasteOpen: '【',
+  pasteClose: '】',
+  pasteEllipsis: '...',
+  pasteCountSeparator: '，',
+  pasteCountSuffix: '字符',
+
   connectDone: '已连接模型商 {provider}，现在可使用 /model {provider}/模型ID 切换模型。',
 } as const
 

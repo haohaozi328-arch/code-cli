@@ -28,6 +28,8 @@ import { SPINNER_INTERVAL_MS, formatElapsed, spinnerFrame } from './spinner.ts'
 import { TaskPanel } from './todos.tsx'
 import { TIMELINE_PAGE, TaskBoard, isBoardToggle, stepTimelineCursor } from './taskboard.tsx'
 import { contextBand, contextRing, formatTokenCount, formatTokenRate } from './status.ts'
+import type { PasteSpan } from './paste-spans.ts'
+import { foldInput, isPasteChunk, spansAfterDelete, spansAfterInsert } from './paste-spans.ts'
 import type { ThemeTokens } from './theme.ts'
 import type { UiChrome } from './chrome.ts'
 
@@ -65,6 +67,7 @@ function renderInputWithCursor(
   theme: ThemeTokens,
   running: boolean,
   placeholder?: string,
+  pasteSpans: readonly PasteSpan[] = [],
 ): React.JSX.Element {
   if (text === '') {
     return (
@@ -74,18 +77,23 @@ function renderInputWithCursor(
       </>
     )
   }
-  const clamped = Math.min(Math.max(0, cursor), text.length)
-  if (clamped >= text.length) {
+  // Pasted regions never render verbatim: the buffer keeps them whole while
+  // the prompt shows 【head...tail，N字符】, so one large paste stays a single
+  // prompt line instead of a multi-screen repaint.
+  const folded = foldInput(text, pasteSpans)
+  const shown = folded.display
+  const clamped = folded.mapCursor(Math.min(Math.max(0, cursor), text.length))
+  if (clamped >= shown.length) {
     return (
       <>
-        <Text color={theme.text}>{previewInput(text)}</Text>
+        <Text color={theme.text}>{previewInput(shown)}</Text>
         <Text color={theme.brand}>▌</Text>
       </>
     )
   }
-  const before = previewInput(text.slice(0, clamped))
-  const under = previewInput(text.slice(clamped, clamped + 1)) || ' '
-  const after = previewInput(text.slice(clamped + 1))
+  const before = previewInput(shown.slice(0, clamped))
+  const under = previewInput(shown.slice(clamped, clamped + 1)) || ' '
+  const after = previewInput(shown.slice(clamped + 1))
   return (
     <>
       <Text color={theme.text}>{before}</Text>
@@ -195,6 +203,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const [cursorPos, setCursorPos] = useState(0)
   const cursorRef = useRef(0)
   cursorRef.current = Math.min(cursorPos, input.length)
+  // Folded pasted regions of the buffer (display only; the buffer stays whole).
+  const [pasteSpans, setPasteSpans] = useState<readonly PasteSpan[]>([])
+  const pasteSpansRef = useRef<readonly PasteSpan[]>([])
+  pasteSpansRef.current = pasteSpans
   const [pickerIndex, setPickerIndex] = useState(0)
   const [sessionSearch, setSessionSearch] = useState('')
   const [commandIndex, setCommandIndex] = useState(0)
@@ -294,6 +306,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     setInput(val)
     cursorRef.current = val.length
     setCursorPos(val.length)
+    // A wholesale buffer swap (send, recall, cancel) has no pasted regions.
+    pasteSpansRef.current = []
+    setPasteSpans([])
   }
 
   const insertText = (chunk: string) => {
@@ -301,7 +316,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     const nextCur = cur + chunk.length
     cursorRef.current = nextCur
     setCursorPos(nextCur)
-    setInput(prev => {
+    const spans = spansAfterInsert(pasteSpansRef.current, cur, chunk.length, isPasteChunk(chunk))
+    pasteSpansRef.current = spans
+    setPasteSpans(spans)
+    setInput((prev) => {
       const c = Math.min(cur, prev.length)
       const next = prev.slice(0, c) + chunk + prev.slice(c)
       inputRef.current = next
@@ -315,7 +333,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     const nextCur = cur - 1
     cursorRef.current = nextCur
     setCursorPos(nextCur)
-    setInput(prev => {
+    const spans = spansAfterDelete(pasteSpansRef.current, cur - 1, 1)
+    pasteSpansRef.current = spans
+    setPasteSpans(spans)
+    setInput((prev) => {
       const c = Math.min(cur, prev.length)
       if (c === 0) return prev
       const next = prev.slice(0, c - 1) + prev.slice(c)
@@ -327,7 +348,10 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const deleteForward = () => {
     const cur = Math.min(cursorRef.current, inputRef.current.length)
     if (cur >= inputRef.current.length) return
-    setInput(prev => {
+    const spans = spansAfterDelete(pasteSpansRef.current, cur, 1)
+    pasteSpansRef.current = spans
+    setPasteSpans(spans)
+    setInput((prev) => {
       const c = Math.min(cur, prev.length)
       if (c >= prev.length) return prev
       const next = prev.slice(0, c) + prev.slice(c + 1)
@@ -337,7 +361,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   }
 
   const moveCursorLeft = () => {
-    setCursorPos(prev => {
+    setCursorPos((prev) => {
       const next = Math.max(0, prev - 1)
       cursorRef.current = next
       return next
@@ -345,7 +369,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   }
 
   const moveCursorRight = () => {
-    setCursorPos(prev => {
+    setCursorPos((prev) => {
       const next = Math.min(input.length, prev + 1)
       cursorRef.current = next
       return next
@@ -641,6 +665,13 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
       vm.quit()
       return
     }
+    // A multi-line paste reaches Ink as ONE chunk whose embedded CR raises
+    // key.return: it must land in the buffer as a folded paste, never fire the
+    // send gesture the lone Enter key owns.
+    if (chunk.length > 1 && isPasteChunk(chunk) && !key.ctrl && !key.meta) {
+      insertText(chunk)
+      return
+    }
     // Ctrl+T folds or unfolds the agent task panel.
     if (key.ctrl && lower === 't' && !key.meta) {
       setTodosCollapsed(prev => !prev)
@@ -799,7 +830,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
   const classicInput = (
     <Box marginTop={1}>
       <Text color={theme.brand}>❯ </Text>
-      {renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder)}
+      {renderInputWithCursor(input, cursorPos, theme, running, COPY.classicInputPlaceholder, pasteSpans)}
     </Box>
   )
 
@@ -814,6 +845,7 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
             theme,
             running,
             connectWizard !== null || titleEditor !== null ? undefined : COPY.composerPlaceholder,
+            pasteSpans,
           )}
         </Box>
         <Box marginTop={1} justifyContent="space-between">
