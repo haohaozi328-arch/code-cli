@@ -62,12 +62,25 @@ function createPromptHistory(seed = []) {
 */
 /** Product name shown in help text and the welcome wordmark. */
 const PRODUCT = "dsh cli";
-/** Wordmark glyphs of the opencode-style welcome page, spelled left to right. */
+/** Wordmark glyphs of the narrow welcome page, spelled left to right. */
 const WORDMARK = [
-	"𝗖",
-	"𝗢",
 	"𝗗",
-	"𝗘"
+	"𝗦",
+	"𝗛"
+];
+/**
+* Block-letter banner of the empty-session welcome page, one string per row.
+* Every row is the same display width, so the page can centre it by measuring
+* one of them, and the page falls back to {@link WORDMARK} when the terminal
+* is narrower than {@link WELCOME_BANNER_WIDTH}.
+*/
+const WELCOME_BANNER = [
+	"██████╗  ███████╗ ██╗  ██╗",
+	"██╔══██╗ ██╔════╝ ██║  ██║",
+	"██║  ██║ ███████╗ ███████║",
+	"██║  ██║ ╚════██║ ██╔══██║",
+	"██████╔╝ ███████║ ██║  ██║",
+	"╚═════╝  ╚══════╝ ╚═╝  ╚═╝"
 ];
 /** User-visible copy shared by the classic and opencode layouts. */
 const COPY = {
@@ -140,6 +153,7 @@ const COPY = {
 	titleUnavailable: "标题服务未挂载，无法重命名",
 	titleFailedPrefix: "/title 失败：",
 	welcomeTagline: "终端助手",
+	welcomeReady: "说出你要做的事，或按 / 打开命令面板",
 	injectedPrefix: "〔injected〕",
 	errorGlyph: "⚠",
 	defaultToolGlyph: "⚙",
@@ -3047,7 +3061,11 @@ const MIN_VIEWPORT_ROWS = 12;
 const LIVE_MIN_ROWS = 3;
 /** Ink resets at `outputHeight >= rows`, so a safe frame stops one row short of the viewport. */
 const SPARE_ROWS = 1;
-/** Rows a transcript row adds around its text: its blank row below, and one row of slack for a fenced block's language header and the indent the text wraps inside. */
+/**
+* Rows a transcript row adds around its text: its blank row below, and one row
+* of slack for a fenced block's language header and the indent the text wraps
+* inside.
+*/
 const ROW_OVERHEAD = 2;
 /** Row the classic chrome prints above a user or assistant row. */
 const ROLE_LABEL_ROWS = 1;
@@ -3070,8 +3088,14 @@ const LIVE_CHROME = {
 	opencodeComposer: 8,
 	/** An error row and its margin. */
 	error: 2,
-	/** The tool-approval modal. */
-	approval: 5,
+	/**
+	* The tool-approval modal: two frame rows, three truncated content rows, and
+	* the margin below it. `ApprovalModal` is built to paint exactly this — an
+	* under-count here is what let an approval frame reach the viewport height
+	* and make Ink clear the screen and replay the whole committed transcript,
+	* so the tool call appeared to render again every time permission was asked.
+	*/
+	approval: 6,
 	/** `SessionPicker`: heading, search field, five rows, and a footer. */
 	sessionPicker: 10,
 	/** `ChoiceList`: heading, eight rows, and a footer. */
@@ -3377,35 +3401,27 @@ function ApprovalModal(props) {
 		borderStyle: "double",
 		borderColor: theme.warn,
 		marginBottom: 1,
+		paddingX: 1,
 		children: [
-			jsxs(Box, {
-				marginLeft: 1,
-				marginTop: 1,
-				children: [jsx(Text, {
-					color: theme.warn,
-					bold: true,
-					children: COPY.approvalTitle
-				}), prompt.reason !== void 0 && jsxs(Text, {
+			jsxs(Text, {
+				wrap: "truncate-end",
+				color: theme.warn,
+				bold: true,
+				children: [COPY.approvalTitle, prompt.reason !== void 0 && jsxs(Text, {
 					color: theme.muted,
 					children: ["  ·  ", prompt.reason]
 				})]
 			}),
-			jsx(Box, {
-				marginLeft: 1,
-				marginBottom: 1,
-				children: jsx(Text, {
-					color: theme.text,
-					children: prompt.toolName
-				})
+			jsx(Text, {
+				wrap: "truncate-end",
+				color: theme.text,
+				children: prompt.toolName
 			}),
-			jsx(Box, {
-				marginLeft: 1,
-				marginBottom: 1,
-				children: jsx(Text, {
-					color: theme.muted,
-					dimColor: true,
-					children: COPY.approvalHint
-				})
+			jsx(Text, {
+				wrap: "truncate-end",
+				color: theme.muted,
+				dimColor: true,
+				children: COPY.approvalHint
 			})
 		]
 	});
@@ -3730,13 +3746,121 @@ function foldInput(text, spans) {
 const OPENCODE_COLUMN = 104;
 /** Keep a large paste from turning the prompt into a multi-screen repaint; the full buffer is preserved. */
 const INPUT_PREVIEW_LIMIT = 240;
-/** Colours of the welcome wordmark, one per glyph. */
+/** Colours of the inline welcome wordmark, one per glyph. */
 const WORDMARK_COLORS = [
 	"#9BE800",
 	"#A9EA1A",
 	"#B9EC43",
 	"#C9E98A"
 ];
+/** Gradient down the welcome banner and along its rule, one colour per row / segment. */
+const BANNER_COLORS = [
+	"#9BE800",
+	"#A6E813",
+	"#B2E92E",
+	"#BEEA4B",
+	"#C9E96B",
+	"#D4E98F"
+];
+/** Rows the welcome page paints besides its banner: tagline, rule, closing line, and their margins. */
+const WELCOME_TRIM_ROWS = 6;
+/** Viewport height below which the welcome page drops the banner for the inline wordmark. */
+const WELCOME_BANNER_MIN_ROWS = 24;
+/**
+* Gradient rule under the welcome banner, one coloured segment per band.
+*
+* The Box claims the full column (`width="100%"`): a row container sized to its
+* own content has nothing to centre inside, which left the rule hugging the
+* left edge while the banner above it sat centred.
+*/
+function WelcomeRule(props) {
+	const span = Math.max(1, Math.floor(Math.min(props.width, 48) / BANNER_COLORS.length));
+	return jsx(Box, {
+		width: "100%",
+		justifyContent: "center",
+		marginTop: 1,
+		children: BANNER_COLORS.map((color, index) => jsx(Text, {
+			color,
+			dimColor: index >= BANNER_COLORS.length - 2,
+			children: "─".repeat(span)
+		}, color))
+	});
+}
+/**
+* Splash of an empty session — what `/new` lands on. The banner, the session's
+* own model and permission line, a gradient rule, and one line of invitation —
+* nothing else. The command surface is one `/` away and names itself there, so
+* the page stays quiet instead of reprinting a cheat sheet. Every piece is
+* sized from the column it is handed, so the page keeps the height the caller
+* reserved for it (see `WELCOME_TRIM_ROWS`) at any terminal size.
+*/
+function WelcomeArt(props) {
+	const { width, theme, modelLabel, permissionPreset, banner } = props;
+	return jsxs(Fragment, { children: [
+		banner ? jsx(Box, {
+			width: "100%",
+			flexDirection: "column",
+			alignItems: "center",
+			children: WELCOME_BANNER.map((row, index) => jsx(Text, {
+				wrap: "truncate-end",
+				color: BANNER_COLORS[index] ?? theme.brand,
+				bold: true,
+				children: row
+			}, row))
+		}) : jsx(Box, {
+			width: "100%",
+			justifyContent: "center",
+			children: WORDMARK.map((glyph, index) => jsx(Text, {
+				color: WORDMARK_COLORS[index] ?? theme.brand,
+				bold: true,
+				children: glyph
+			}, glyph))
+		}),
+		jsx(Box, {
+			width: "100%",
+			justifyContent: "center",
+			marginTop: 1,
+			children: jsxs(Text, {
+				wrap: "truncate-end",
+				children: [
+					jsx(Text, {
+						color: theme.text,
+						children: "DeepSeek "
+					}),
+					jsx(Text, {
+						color: theme.brand,
+						bold: true,
+						children: COPY.welcomeTagline
+					}),
+					jsxs(Text, {
+						color: theme.muted,
+						dimColor: true,
+						children: [
+							"  ·  ",
+							modelLabel,
+							"  ·  ",
+							COPY.permissionLabel,
+							" ",
+							permissionPreset
+						]
+					})
+				]
+			})
+		}),
+		jsx(WelcomeRule, { width }),
+		jsx(Box, {
+			width: "100%",
+			justifyContent: "center",
+			marginTop: 1,
+			children: jsx(Text, {
+				wrap: "truncate-end",
+				color: theme.muted,
+				dimColor: true,
+				children: COPY.welcomeReady
+			})
+		})
+	] });
+}
 /** Collapse a multi-line buffer into the single prompt line. */
 function previewInput(value) {
 	const compact = value.replace(/\r?\n/g, COPY.inputNewlineMark);
@@ -3745,11 +3869,11 @@ function previewInput(value) {
 }
 /** Detect whether a keypress is Backspace across platforms (macOS delete, xterm DEL, etc.). */
 function isBackspaceKey(chunk, key) {
-	return Boolean(key.backspace || chunk === "\b" || chunk === "" || key.delete && chunk !== "\x1B[3~");
+	return key.backspace || chunk === "\b" || chunk === "" || key.delete && chunk !== "\x1B[3~";
 }
 /** Detect whether a keypress is forward Delete (PC Del key, etc.). */
 function isForwardDeleteKey(chunk, key) {
-	return Boolean(key.delete && chunk === "\x1B[3~");
+	return key.delete && chunk === "\x1B[3~";
 }
 /** Render prompt input with an interactive cursor pointer. */
 function renderInputWithCursor(text, cursor, theme, running, placeholder, pasteSpans = []) {
@@ -4446,7 +4570,7 @@ function App(props) {
 			]
 		})
 	});
-	const chromeRows = (chrome === "classic" ? LIVE_CHROME.classicInput + LIVE_CHROME.statusLine : LIVE_CHROME.opencodeComposer) + (state.error !== null ? LIVE_CHROME.error : 0) + (pendingApproval !== null ? LIVE_CHROME.approval : 0) + (pickerOpen ? LIVE_CHROME.sessionPicker : 0) + (choicePicker !== null ? LIVE_CHROME.choicePicker : 0) + (commandMenuOpen ? LIVE_CHROME.commandMenu : 0) + (connectWizard !== null || titleEditor !== null ? LIVE_CHROME.prompt : 0) + (todosVisible ? LIVE_CHROME.todoPanel + (todos?.length ?? 0) : 0) + (state.queued.length > 0 ? LIVE_CHROME.queued : 0);
+	const chromeRows = (chrome === "classic" ? LIVE_CHROME.classicInput + LIVE_CHROME.statusLine : LIVE_CHROME.opencodeComposer) + (state.error !== null ? LIVE_CHROME.error : 0) + (pendingApproval !== null ? LIVE_CHROME.approval : 0) + (pickerOpen ? LIVE_CHROME.sessionPicker : 0) + (choicePicker !== null ? LIVE_CHROME.choicePicker : 0) + (commandMenuOpen ? LIVE_CHROME.commandMenu : 0) + (connectWizard !== null || titleEditor !== null ? LIVE_CHROME.prompt : 0) + (todosVisible ? LIVE_CHROME.todoPanel + todos.length : 0) + (state.queued.length > 0 ? LIVE_CHROME.queued : 0);
 	const liveFit = useMemo(() => fitLiveMessages(live, liveRowBudget(rows, chromeRows), {
 		columns,
 		labeled: chrome === "classic",
@@ -4544,48 +4668,40 @@ function App(props) {
 				})
 			})]
 		});
-		if (committed.length === 0 && live.length === 0) return jsxs(Box, {
-			flexDirection: "column",
-			width: "100%",
-			marginTop: Math.max(0, Math.floor((rows - 10) / 2)),
-			children: [staticList, jsx(Box, {
+		if (committed.length === 0 && live.length === 0) {
+			const measured = Number.isFinite(rows);
+			const bannerFits = columnWidth >= 28 && (!measured || rows >= WELCOME_BANNER_MIN_ROWS);
+			const pageRows = (bannerFits ? WELCOME_BANNER.length : 1) + WELCOME_TRIM_ROWS;
+			return jsxs(Box, {
+				flexDirection: "column",
 				width: "100%",
-				justifyContent: "center",
-				children: jsxs(Box, {
-					width: columnWidth,
-					flexDirection: "column",
-					children: [
-						jsx(Box, {
-							justifyContent: "center",
-							children: WORDMARK.map((glyph, index) => jsx(Text, {
-								color: WORDMARK_COLORS[index] ?? theme.brand,
-								bold: true,
-								children: glyph
-							}, glyph))
-						}),
-						jsxs(Box, {
-							justifyContent: "center",
-							marginTop: 1,
-							children: [jsx(Text, {
-								color: theme.text,
-								children: "DeepSeek "
-							}), jsx(Text, {
-								color: theme.brand,
-								bold: true,
-								children: COPY.welcomeTagline
-							})]
-						}),
-						overlays,
-						todosVisible && jsx(TaskPanel, {
-							todos,
-							theme
-						}),
-						queuedNote,
-						opencodeComposer
-					]
-				})
-			})]
-		});
+				marginTop: measured ? Math.max(0, Math.floor((rows - pageRows - LIVE_CHROME.opencodeComposer) / 2)) : 0,
+				children: [staticList, jsx(Box, {
+					width: "100%",
+					justifyContent: "center",
+					children: jsxs(Box, {
+						width: columnWidth,
+						flexDirection: "column",
+						children: [
+							jsx(WelcomeArt, {
+								width: columnWidth,
+								theme,
+								modelLabel: state.modelLabel,
+								permissionPreset: state.permissionPreset,
+								banner: bannerFits
+							}),
+							overlays,
+							todosVisible && jsx(TaskPanel, {
+								todos,
+								theme
+							}),
+							queuedNote,
+							opencodeComposer
+						]
+					})
+				})]
+			});
+		}
 		return jsxs(Box, {
 			flexDirection: "column",
 			width: "100%",

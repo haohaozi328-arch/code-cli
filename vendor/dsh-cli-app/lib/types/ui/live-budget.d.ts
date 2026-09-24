@@ -33,8 +33,14 @@ export declare const LIVE_CHROME: {
     readonly opencodeComposer: 8;
     /** An error row and its margin. */
     readonly error: 2;
-    /** The tool-approval modal. */
-    readonly approval: 5;
+    /**
+     * The tool-approval modal: two frame rows, three truncated content rows, and
+     * the margin below it. `ApprovalModal` is built to paint exactly this — an
+     * under-count here is what let an approval frame reach the viewport height
+     * and make Ink clear the screen and replay the whole committed transcript,
+     * so the tool call appeared to render again every time permission was asked.
+     */
+    readonly approval: 6;
     /** `SessionPicker`: heading, search field, five rows, and a footer. */
     readonly sessionPicker: 10;
     /** `ChoiceList`: heading, eight rows, and a footer. */

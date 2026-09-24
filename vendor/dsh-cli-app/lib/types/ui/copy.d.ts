@@ -7,8 +7,21 @@
 import type { ConnectStep } from './model.ts';
 /** Product name shown in help text and the welcome wordmark. */
 export declare const PRODUCT = "dsh cli";
-/** Wordmark glyphs of the opencode-style welcome page, spelled left to right. */
+/** Wordmark glyphs of the narrow welcome page, spelled left to right. */
 export declare const WORDMARK: readonly string[];
+/**
+ * Block-letter banner of the empty-session welcome page, one string per row.
+ * Every row is the same display width, so the page can centre it by measuring
+ * one of them, and the page falls back to {@link WORDMARK} when the terminal
+ * is narrower than {@link WELCOME_BANNER_WIDTH}.
+ */
+export declare const WELCOME_BANNER: readonly string[];
+/** Display width of every {@link WELCOME_BANNER} row. */
+export declare const WELCOME_BANNER_WIDTH = 26;
+/** Glyph the welcome rule repeats under the banner. */
+export declare const WELCOME_RULE_GLYPH = "\u2500";
+/** Cells the welcome rule spans before the terminal keeps the rest as side air. */
+export declare const WELCOME_RULE_WIDTH = 48;
 /** User-visible copy shared by the classic and opencode layouts. */
 export declare const COPY: {
     readonly approvalTitle: "工具调用确认";
@@ -80,6 +93,7 @@ export declare const COPY: {
     readonly titleUnavailable: "标题服务未挂载，无法重命名";
     readonly titleFailedPrefix: "/title 失败：";
     readonly welcomeTagline: "终端助手";
+    readonly welcomeReady: "说出你要做的事，或按 / 打开命令面板";
     readonly injectedPrefix: "〔injected〕";
     readonly errorGlyph: "⚠";
     readonly defaultToolGlyph: "⚙";
