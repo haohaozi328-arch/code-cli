@@ -28,7 +28,11 @@ const MIN_VIEWPORT_ROWS = 12
 const LIVE_MIN_ROWS = 3
 /** Ink resets at `outputHeight >= rows`, so a safe frame stops one row short of the viewport. */
 const SPARE_ROWS = 1
-/** Rows a transcript row adds around its text: its blank row below, and one row of slack for a fenced block's language header and the indent the text wraps inside. */
+/**
+ * Rows a transcript row adds around its text: its blank row below, and one row
+ * of slack for a fenced block's language header and the indent the text wraps
+ * inside.
+ */
 const ROW_OVERHEAD = 2
 /** Row the classic chrome prints above a user or assistant row. */
 const ROLE_LABEL_ROWS = 1
@@ -52,8 +56,14 @@ export const LIVE_CHROME = {
   opencodeComposer: 8,
   /** An error row and its margin. */
   error: 2,
-  /** The tool-approval modal. */
-  approval: 5,
+  /**
+   * The tool-approval modal: two frame rows, three truncated content rows, and
+   * the margin below it. `ApprovalModal` is built to paint exactly this — an
+   * under-count here is what let an approval frame reach the viewport height
+   * and make Ink clear the screen and replay the whole committed transcript,
+   * so the tool call appeared to render again every time permission was asked.
+   */
+  approval: 6,
   /** `SessionPicker`: heading, search field, five rows, and a footer. */
   sessionPicker: 10,
   /** `ChoiceList`: heading, eight rows, and a footer. */
@@ -171,7 +181,7 @@ function tailToFit(text: string, rows: number, shape: LiveRowShape): string {
  * @returns the rows to paint, the rows left out, and whether the notice fits.
  */
 export function fitLiveMessages(messages: readonly UiMessage[], budget: number, shape: LiveRowShape): LiveFit {
-  const rows: RowMeasure[] = messages.map(message => {
+  const rows: RowMeasure[] = messages.map((message) => {
     const text = textRows(message.text, shape)
     return { message, text, height: liveRowHeight(message, shape) }
   })

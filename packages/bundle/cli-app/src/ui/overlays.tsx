@@ -142,17 +142,21 @@ export function ApprovalModal(props: {
   const { prompt, theme } = props
   if (prompt === null) return <Box />
   return (
-    <Box flexDirection="column" borderStyle="double" borderColor={theme.warn} marginBottom={1}>
-      <Box marginLeft={1} marginTop={1}>
-        <Text color={theme.warn} bold>{COPY.approvalTitle}</Text>
-        {prompt.reason !== undefined && <Text color={theme.muted}>  ·  {prompt.reason}</Text>}
-      </Box>
-      <Box marginLeft={1} marginBottom={1}>
-        <Text color={theme.text}>{prompt.toolName}</Text>
-      </Box>
-      <Box marginLeft={1} marginBottom={1}>
-        <Text color={theme.muted} dimColor>{COPY.approvalHint}</Text>
-      </Box>
+    // Fixed height, by construction: three single rows inside one frame, each
+    // truncated instead of wrapped. The height this paints is what
+    // `LIVE_CHROME.approval` reserves, and the reservation is what keeps the
+    // frame under Ink's viewport threshold. An unmeasured row (a long reason,
+    // a long tool name, the old stack of margins) pushes the frame to the
+    // viewport height, and Ink answers that by clearing the screen and
+    // replaying every committed row — which reads on screen as the tool call
+    // rendering itself again on every approval.
+    <Box flexDirection="column" borderStyle="double" borderColor={theme.warn} marginBottom={1} paddingX={1}>
+      <Text wrap="truncate-end" color={theme.warn} bold>
+        {COPY.approvalTitle}
+        {prompt.reason !== undefined && <Text color={theme.muted}>{'  ·  '}{prompt.reason}</Text>}
+      </Text>
+      <Text wrap="truncate-end" color={theme.text}>{prompt.toolName}</Text>
+      <Text wrap="truncate-end" color={theme.muted} dimColor>{COPY.approvalHint}</Text>
     </Box>
   )
 }
