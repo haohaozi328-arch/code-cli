@@ -9,7 +9,8 @@ import { render } from 'ink-testing-library'
 import { describe, expect, it, vi } from 'vitest'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { App } from '../src/ui/index.ts'
-import { COPY } from '../src/ui/copy.ts'
+import { COPY, WELCOME_BANNER, WELCOME_BANNER_WIDTH } from '../src/ui/copy.ts'
+import { LIVE_CHROME } from '../src/ui/live-budget.ts'
 import { THEMES } from '../src/ui/theme.ts'
 import type { ExitRequest, UiMessage, UiState, ViewModel } from '../src/ui/model.ts'
 
@@ -82,6 +83,88 @@ function viewModel(state: UiState): ViewModel {
 function userRow(key: string, text: string): UiMessage {
   return { key, role: 'user', text, reasoning: '', status: 'done' }
 }
+
+describe('App welcome page', () => {
+  /** Render an empty opencode session — the surface `/new` lands on. */
+  function welcome(overrides: Partial<UiState> = {}): string {
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot(overrides)),
+      theme: THEMES['deep-forest'],
+      ui: 'opencode',
+    }))
+    const frame = instance.lastFrame() ?? ''
+    instance.unmount()
+    return frame
+  }
+
+  it('paints the block banner, the session line, and the invitation', () => {
+    const frame = welcome({ modelLabel: 'deepseek-chat' })
+    for (const row of WELCOME_BANNER) expect(frame).toContain(row)
+    expect(frame).toContain(COPY.welcomeTagline)
+    expect(frame).toContain('deepseek-chat')
+    expect(frame).toContain(COPY.welcomeReady)
+    // The page stays quiet: no cheat sheet of chords under the banner.
+    expect(frame).not.toContain('Ctrl+T')
+  })
+
+  it('centres the gradient rule under the banner', () => {
+    const lines = welcome().split('\n')
+    const banner = lines.find(line => line.includes(WELCOME_BANNER[2] ?? '')) ?? ''
+    const rule = lines.find(line => line.includes('────')) ?? ''
+    expect(rule).not.toBe('')
+    const centre = (line: string): number => {
+      const start = line.length - line.trimStart().length
+      return start + (line.trimEnd().length - start) / 2
+    }
+    // Both blocks are centred in the same column, so their midpoints agree.
+    expect(Math.abs(centre(rule) - centre(banner))).toBeLessThanOrEqual(1)
+  })
+
+  it('keeps every banner row one display width, so the page centres as a block', () => {
+    // Every glyph is a BMP box-drawing character, so code units are cells here.
+    const widths = new Set(WELCOME_BANNER.map(row => row.length))
+    expect(widths.size).toBe(1)
+    expect([...widths][0]).toBe(WELCOME_BANNER_WIDTH)
+  })
+
+  it('yields to the transcript once the session has a row', () => {
+    const frame = welcome({ messages: [userRow('u1', 'hello')] })
+    expect(frame).not.toContain(WELCOME_BANNER[0])
+    expect(frame).toContain('hello')
+  })
+})
+
+describe('App approval frame', () => {
+  it('paints the reserved height and truncates instead of wrapping', () => {
+    // The reservation in `LIVE_CHROME.approval` is what keeps the frame under
+    // Ink's viewport threshold; a taller frame makes Ink clear the screen and
+    // replay the committed transcript, which shows the tool call twice.
+    const instance = render(React.createElement(App, {
+      key: 's-1',
+      vm: viewModel(snapshot({
+        messages: [userRow('u1', 'run it')],
+        pendingApproval: {
+          toolName: 'bash',
+          reason: 'x'.repeat(400),
+          resolve: () => {},
+        } as UiState['pendingApproval'],
+      })),
+      theme: THEMES['deep-forest'],
+      ui: 'opencode',
+    }))
+    const frame = instance.lastFrame() ?? ''
+    const lines = frame.split('\n')
+    const top = lines.findIndex(line => line.includes('╔'))
+    const bottom = lines.findIndex(line => line.includes('╚'))
+    expect(top).toBeGreaterThanOrEqual(0)
+    // Frame rows plus the margin below it: exactly what the budget reserves.
+    expect(bottom - top + 1 + 1).toBe(LIVE_CHROME.approval)
+    expect(frame).toContain(COPY.approvalTitle)
+    expect(frame).toContain(COPY.approvalHint)
+    instance.unmount()
+  })
+})
 
 describe('App transcript', () => {
   it('writes committed rows and keeps the streaming row live', () => {
@@ -162,7 +245,11 @@ describe('App transcript', () => {
     expect(frame).toContain(`${COPY.contextLabel} ◑ 45%`)
     // The composer's model/permission line is untouched.
     expect(frame).toContain(`${COPY.permissionLabel} ask`)
-    expect(frame).not.toContain('/model')
+    // The composer row carries the meters, not a slash-command hint. Asserted
+    // on that row alone: the welcome page's chord grid names `/model` on its
+    // own line by design.
+    const composerRow = frame.split('\n').find(line => line.includes(`${COPY.permissionLabel} ask`)) ?? ''
+    expect(composerRow).not.toContain('/model')
     instance.unmount()
   })
 

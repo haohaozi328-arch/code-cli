@@ -10,8 +10,32 @@ import type { ConnectStep } from './model.ts'
 /** Product name shown in help text and the welcome wordmark. */
 export const PRODUCT = 'dsh cli'
 
-/** Wordmark glyphs of the opencode-style welcome page, spelled left to right. */
-export const WORDMARK: readonly string[] = ['𝗖', '𝗢', '𝗗', '𝗘']
+/** Wordmark glyphs of the narrow welcome page, spelled left to right. */
+export const WORDMARK: readonly string[] = ['𝗗', '𝗦', '𝗛']
+
+/**
+ * Block-letter banner of the empty-session welcome page, one string per row.
+ * Every row is the same display width, so the page can centre it by measuring
+ * one of them, and the page falls back to {@link WORDMARK} when the terminal
+ * is narrower than {@link WELCOME_BANNER_WIDTH}.
+ */
+export const WELCOME_BANNER: readonly string[] = [
+  '██████╗  ███████╗ ██╗  ██╗',
+  '██╔══██╗ ██╔════╝ ██║  ██║',
+  '██║  ██║ ███████╗ ███████║',
+  '██║  ██║ ╚════██║ ██╔══██║',
+  '██████╔╝ ███████║ ██║  ██║',
+  '╚═════╝  ╚══════╝ ╚═╝  ╚═╝',
+]
+
+/** Display width of every {@link WELCOME_BANNER} row. */
+export const WELCOME_BANNER_WIDTH = 26
+
+/** Glyph the welcome rule repeats under the banner. */
+export const WELCOME_RULE_GLYPH = '─'
+
+/** Cells the welcome rule spans before the terminal keeps the rest as side air. */
+export const WELCOME_RULE_WIDTH = 48
 
 /** User-visible copy shared by the classic and opencode layouts. */
 export const COPY = {
@@ -96,6 +120,7 @@ export const COPY = {
   titleFailedPrefix: '/title 失败：',
 
   welcomeTagline: '终端助手',
+  welcomeReady: '说出你要做的事，或按 / 打开命令面板',
 
   injectedPrefix: '〔injected〕',
   errorGlyph: '⚠',

@@ -17,7 +17,9 @@
 import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { Box, Static, Text, useInput, useStdout } from 'ink'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
-import { COPY, WORDMARK } from './copy.ts'
+import {
+  COPY, WELCOME_BANNER, WELCOME_BANNER_WIDTH, WELCOME_RULE_GLYPH, WELCOME_RULE_WIDTH, WORDMARK,
+} from './copy.ts'
 import type { UiMessage, ViewModel } from './model.ts'
 import { COMMAND_HINTS } from './state.ts'
 import { collapseFirstLine, splitTranscript } from './transcript.ts'
@@ -42,8 +44,87 @@ const OPENCODE_MIN_COLUMN = 44
 /** Keep a large paste from turning the prompt into a multi-screen repaint; the full buffer is preserved. */
 const INPUT_PREVIEW_LIMIT = 240
 
-/** Colours of the welcome wordmark, one per glyph. */
+/** Colours of the inline welcome wordmark, one per glyph. */
 const WORDMARK_COLORS: readonly string[] = ['#9BE800', '#A9EA1A', '#B9EC43', '#C9E98A']
+
+/** Gradient down the welcome banner and along its rule, one colour per row / segment. */
+const BANNER_COLORS: readonly string[] = ['#9BE800', '#A6E813', '#B2E92E', '#BEEA4B', '#C9E96B', '#D4E98F']
+
+/** Rows the welcome page paints besides its banner: tagline, rule, closing line, and their margins. */
+const WELCOME_TRIM_ROWS = 6
+
+/** Viewport height below which the welcome page drops the banner for the inline wordmark. */
+const WELCOME_BANNER_MIN_ROWS = 24
+
+/**
+ * Gradient rule under the welcome banner, one coloured segment per band.
+ *
+ * The Box claims the full column (`width="100%"`): a row container sized to its
+ * own content has nothing to centre inside, which left the rule hugging the
+ * left edge while the banner above it sat centred.
+ */
+function WelcomeRule(props: { width: number }): React.JSX.Element {
+  const span = Math.max(1, Math.floor(Math.min(props.width, WELCOME_RULE_WIDTH) / BANNER_COLORS.length))
+  return (
+    <Box width="100%" justifyContent="center" marginTop={1}>
+      {BANNER_COLORS.map((color, index) => (
+        <Text key={color} color={color} dimColor={index >= BANNER_COLORS.length - 2}>
+          {WELCOME_RULE_GLYPH.repeat(span)}
+        </Text>
+      ))}
+    </Box>
+  )
+}
+
+/**
+ * Splash of an empty session — what `/new` lands on. The banner, the session's
+ * own model and permission line, a gradient rule, and one line of invitation —
+ * nothing else. The command surface is one `/` away and names itself there, so
+ * the page stays quiet instead of reprinting a cheat sheet. Every piece is
+ * sized from the column it is handed, so the page keeps the height the caller
+ * reserved for it (see `WELCOME_TRIM_ROWS`) at any terminal size.
+ */
+function WelcomeArt(props: {
+  width: number
+  theme: ThemeTokens
+  modelLabel: string
+  permissionPreset: string
+  banner: boolean
+}): React.JSX.Element {
+  const { width, theme, modelLabel, permissionPreset, banner } = props
+  return (
+    <>
+      {banner
+        ? (
+          <Box width="100%" flexDirection="column" alignItems="center">
+            {WELCOME_BANNER.map((row, index) => (
+              <Text key={row} wrap="truncate-end" color={BANNER_COLORS[index] ?? theme.brand} bold>{row}</Text>
+            ))}
+          </Box>
+        )
+        : (
+          <Box width="100%" justifyContent="center">
+            {WORDMARK.map((glyph, index) => (
+              <Text key={glyph} color={WORDMARK_COLORS[index] ?? theme.brand} bold>{glyph}</Text>
+            ))}
+          </Box>
+        )}
+      <Box width="100%" justifyContent="center" marginTop={1}>
+        <Text wrap="truncate-end">
+          <Text color={theme.text}>DeepSeek </Text>
+          <Text color={theme.brand} bold>{COPY.welcomeTagline}</Text>
+          <Text color={theme.muted} dimColor>
+            {'  ·  '}{modelLabel}{'  ·  '}{COPY.permissionLabel} {permissionPreset}
+          </Text>
+        </Text>
+      </Box>
+      <WelcomeRule width={width} />
+      <Box width="100%" justifyContent="center" marginTop={1}>
+        <Text wrap="truncate-end" color={theme.muted} dimColor>{COPY.welcomeReady}</Text>
+      </Box>
+    </>
+  )
+}
 
 /** Collapse a multi-line buffer into the single prompt line. */
 function previewInput(value: string): string {
@@ -54,12 +135,12 @@ function previewInput(value: string): string {
 
 /** Detect whether a keypress is Backspace across platforms (macOS delete, xterm DEL, etc.). */
 function isBackspaceKey(chunk: string, key: { backspace: boolean; delete: boolean }): boolean {
-  return Boolean(key.backspace || chunk === '\x08' || chunk === '\x7f' || (key.delete && chunk !== '\x1b[3~'))
+  return key.backspace || chunk === '\x08' || chunk === '\x7f' || (key.delete && chunk !== '\x1b[3~')
 }
 
 /** Detect whether a keypress is forward Delete (PC Del key, etc.). */
 function isForwardDeleteKey(chunk: string, key: { delete: boolean }): boolean {
-  return Boolean(key.delete && chunk === '\x1b[3~')
+  return key.delete && chunk === '\x1b[3~'
 }
 
 /** Render prompt input with an interactive cursor pointer. */
@@ -813,7 +894,9 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     + (choicePicker !== null ? LIVE_CHROME.choicePicker : 0)
     + (commandMenuOpen ? LIVE_CHROME.commandMenu : 0)
     + (connectWizard !== null || titleEditor !== null ? LIVE_CHROME.prompt : 0)
-    + (todosVisible ? LIVE_CHROME.todoPanel + (todos?.length ?? 0) : 0)
+    // `todosVisible` is false unless `todos` is a non-empty list, so the panel
+    // branch reads the length directly.
+    + (todosVisible ? LIVE_CHROME.todoPanel + todos.length : 0)
     + (state.queued.length > 0 ? LIVE_CHROME.queued : 0)
   const liveFit = useMemo(
     () => fitLiveMessages(live, liveRowBudget(rows, chromeRows), {
@@ -905,21 +988,27 @@ export function App(props: { vm: ViewModel; theme: ThemeTokens; ui?: UiChrome })
     // Empty session: a centered welcome page. The content is measured in rows
     // so a terminal resize immediately repositions it.
     if (committed.length === 0 && live.length === 0) {
-      const verticalOffset = Math.max(0, Math.floor((rows - 10) / 2))
+      // A stream that reports no height (a pipe, a test double) gets the full
+      // page with no offset: there is no viewport to centre inside.
+      const measured = Number.isFinite(rows)
+      const bannerFits = columnWidth >= WELCOME_BANNER_WIDTH + 2
+        && (!measured || rows >= WELCOME_BANNER_MIN_ROWS)
+      const pageRows = (bannerFits ? WELCOME_BANNER.length : 1) + WELCOME_TRIM_ROWS
+      const verticalOffset = measured
+        ? Math.max(0, Math.floor((rows - pageRows - LIVE_CHROME.opencodeComposer) / 2))
+        : 0
       return (
         <Box flexDirection="column" width="100%" marginTop={verticalOffset}>
           {staticList}
           <Box width="100%" justifyContent="center">
             <Box width={columnWidth} flexDirection="column">
-              <Box justifyContent="center">
-                {WORDMARK.map((glyph, index) => (
-                  <Text key={glyph} color={WORDMARK_COLORS[index] ?? theme.brand} bold>{glyph}</Text>
-                ))}
-              </Box>
-              <Box justifyContent="center" marginTop={1}>
-                <Text color={theme.text}>DeepSeek </Text>
-                <Text color={theme.brand} bold>{COPY.welcomeTagline}</Text>
-              </Box>
+              <WelcomeArt
+                width={columnWidth}
+                theme={theme}
+                modelLabel={state.modelLabel}
+                permissionPreset={state.permissionPreset}
+                banner={bannerFits}
+              />
               {overlays}
               {todosVisible && <TaskPanel todos={todos} theme={theme} />}
               {queuedNote}
